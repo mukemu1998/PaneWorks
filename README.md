@@ -35,6 +35,7 @@ PaneWorks/
     technical-design.zh-CN.md
     portable-readme.zh-CN.md
     release-notes-v0.1.0.zh-CN.md
+    github-release-guide.zh-CN.md
   scripts/
     package_portable.ps1
   artifacts/                   发布产物输出目录（已忽略）
@@ -93,7 +94,11 @@ artifacts/
       PaneWorks-v0.1.0-win-x64-portable.zip
 ```
 
-## GitHub 上传建议
+## GitHub 更新与上传
+
+完整中文操作说明见：
+
+- [GitHub 更新与发布指南](E:\GITHUB\PaneWorks\docs\github-release-guide.zh-CN.md)
 
 源码仓库建议上传：
 
