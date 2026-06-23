@@ -1,0 +1,16 @@
+bin/
+obj/
+.vs/
+artifacts/
+publish/
+*.user
+*.suo
+*.cache
+*.pdb
+*.tmp
+*.log
+*.zip
+*.7z
+*.nupkg
+*.snupkg
+TestResults/

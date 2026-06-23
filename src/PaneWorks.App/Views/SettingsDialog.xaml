@@ -1,0 +1,130 @@
+<Window x:Class="PaneWorks.App.Views.SettingsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PaneWorks 设置"
+        Width="820"
+        MinWidth="760"
+        MinHeight="560"
+        MaxHeight="900"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#FF131A28"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="18" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="18" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="18" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel>
+                <TextBlock FontSize="28"
+                           FontWeight="Bold"
+                           Text="设置" />
+                <TextBlock Margin="0,8,0,0"
+                           Foreground="#CFE7FF"
+                           Text="自定义吸附触发键、最小化快捷键，以及开机启动行为。点击“开始录制”后直接按下你想要的快捷键组合。"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+
+            <StackPanel Grid.Row="2">
+                <TextBlock Margin="0,0,0,8"
+                           FontSize="14"
+                           Foreground="#B8D8FF"
+                           Text="吸附触发键" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="150" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBox x:Name="SnapModifierTextBox"
+                             Margin="0,0,14,0"
+                             IsReadOnly="True"
+                             FontSize="16"
+                             Text="Shift" />
+                    <Button Grid.Column="1"
+                            x:Name="RecordSnapShortcutButton"
+                            Click="RecordSnapShortcutButton_Click"
+                            Content="开始录制" />
+                </Grid>
+            </StackPanel>
+
+            <StackPanel Grid.Row="4">
+                <TextBlock Margin="0,0,0,8"
+                           FontSize="14"
+                           Foreground="#B8D8FF"
+                           Text="最小化快捷键" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="150" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBox x:Name="MinimizeShortcutTextBox"
+                             Margin="0,0,14,0"
+                             IsReadOnly="True"
+                             FontSize="16"
+                             Text="Esc" />
+                    <Button Grid.Column="1"
+                            x:Name="RecordMinimizeShortcutButton"
+                            Click="RecordMinimizeShortcutButton_Click"
+                            Content="开始录制" />
+                </Grid>
+            </StackPanel>
+
+            <Border Grid.Row="6"
+                    Padding="18"
+                    Margin="0,10,0,0"
+                    Background="#90101625"
+                    BorderBrush="#24FFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="20">
+                <StackPanel>
+                    <CheckBox x:Name="LaunchAtStartupCheckBox"
+                              Content="开机自动启动 PaneWorks" />
+                    <TextBlock x:Name="RecordingHintTextBlock"
+                               Margin="0,14,0,0"
+                               Foreground="#CFE7FF"
+                               Text="说明：吸附触发键支持单独的 Shift、Ctrl、Alt，也支持 Ctrl + Alt + A 这类组合。最小化快捷键同样支持完全自定义。"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Grid Grid.Row="7"
+                  Margin="0,20,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Button Grid.Column="0"
+                        Width="180"
+                        HorizontalAlignment="Left"
+                        Click="RestoreDefaultsButton_Click"
+                        Content="恢复默认快捷键" />
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right">
+                    <Button Width="150"
+                            Margin="0,0,14,0"
+                            IsCancel="True"
+                            Content="取消" />
+                    <Button Width="150"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            IsDefault="True"
+                            Click="ConfirmButton_Click"
+                            Content="保存设置" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </ScrollViewer>
+</Window>

@@ -1,0 +1,22 @@
+<Window x:Class="PaneWorks.App.SnapOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:PaneWorks.App.Controls"
+        Title="PaneWorksSnapOverlay"
+        Width="1600"
+        Height="960"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ShowActivated="False">
+    <Grid Background="Transparent"
+          IsHitTestVisible="False">
+        <controls:EditorCanvasControl Document="{Binding OverlaySnapDocument}"
+                                      SelectedNodeId="{x:Null}"
+                                      PreviewNodeId="{Binding PreviewNodeId}"
+                                      IsHitTestVisible="False" />
+    </Grid>
+</Window>
