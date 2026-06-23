@@ -1,3 +1,4 @@
+# Build and release artifacts
 bin/
 obj/
 .vs/

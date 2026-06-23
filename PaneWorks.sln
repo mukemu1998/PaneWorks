@@ -1,5 +1,6 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
+# PaneWorks workspace solution
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "PaneWorks.App", "src\PaneWorks.App\PaneWorks.App.csproj", "{A9B63DE4-7867-4B49-9859-7D1B1A4C7B01}"
@@ -31,4 +32,3 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 EndGlobal
-

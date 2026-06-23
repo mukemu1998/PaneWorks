@@ -1,5 +1,6 @@
 <Project>
   <PropertyGroup>
+    <!-- Keep version metadata centralized for release updates. -->
     <Authors>HKJ</Authors>
     <Company>PaneWorks</Company>
     <Product>PaneWorks</Product>

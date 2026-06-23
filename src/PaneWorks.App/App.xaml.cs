@@ -7,6 +7,7 @@ namespace PaneWorks.App;
 
 public partial class App : Wpf.Application
 {
+    // Tray colors are centralized here so the editor and tray stay visually consistent.
     private static readonly Drawing.Color TrayBackColor = Drawing.Color.FromArgb(21, 27, 42);
     private static readonly Drawing.Color TrayBackHoverColor = Drawing.Color.FromArgb(47, 128, 237);
     private static readonly Drawing.Color TrayBackCheckedColor = Drawing.Color.FromArgb(47, 163, 107);

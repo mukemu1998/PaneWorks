@@ -11,6 +11,7 @@ $propsPath = Join-Path $repoRoot "Directory.Build.props"
 $portableReadme = Join-Path $repoRoot "docs\portable-readme.zh-CN.md"
 $dotnet = "C:\Program Files\dotnet\dotnet.exe"
 
+# Keep the portable bundle minimal and ready to unzip-run.
 if (-not (Test-Path $dotnet)) {
     $dotnet = "dotnet"
 }
