@@ -1,8 +1,9 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using PaneWorks.App.Controls;
+using PaneWorks.App.Diagnostics;
 using PaneWorks.App.Views;
 using PaneWorks.Core.Abstractions;
 using PaneWorks.Core.Models;
@@ -18,6 +19,7 @@ public sealed class MainViewModel : ObservableObject
 {
     private readonly LayoutEditorService _editorService = new();
     private readonly LayoutTreeQueryService _queryService = new();
+    private readonly DisplayDiscoveryService _displayDiscoveryService = new();
     private readonly ILayoutRepository _layoutRepository;
     private readonly JsonAppSettingsRepository _appSettingsRepository;
     private readonly JsonSessionStateRepository _sessionStateRepository;
@@ -27,19 +29,23 @@ public sealed class MainViewModel : ObservableObject
     private readonly RelayCommand _redoCommand;
     private readonly Stack<EditorHistoryState> _undoStack = new();
     private readonly Stack<EditorHistoryState> _redoStack = new();
+    private readonly Dictionary<string, DisplayInfo> _displaysById = new(StringComparer.OrdinalIgnoreCase);
 
     private AppSettings _appSettings;
+    private WorkspaceLayoutDocument _currentWorkspaceDocument;
+    private WorkspaceLayoutDocument _activeSnapWorkspaceDocument;
     private LayoutDocument _currentDocument;
-    private LayoutDocument _activeSnapDocument;
-    private LayoutDocument? _previewSnapDocument;
-    private PersistedLayoutState _savedState;
+    private PersistedWorkspaceState _savedState;
     private string? _currentLayoutId;
     private string? _activeSnapLayoutId;
     private string _activeSnapLayoutName;
     private string? _selectedNodeId;
-    private string? _previewNodeId;
-    private bool _isDirty;
     private LayoutListItemViewModel? _selectedLayoutItem;
+    private DisplayItemViewModel? _selectedDisplayItem;
+    private bool _isDirty;
+    private bool _suppressDisplaySelectionChange;
+    private bool _isSavingLayout;
+    private string _lastStatusMessage = string.Empty;
 
     public MainViewModel()
     {
@@ -47,13 +53,18 @@ public sealed class MainViewModel : ObservableObject
         _appSettingsRepository = new JsonAppSettingsRepository(LayoutStoragePaths.GetDefaultAppSettingsFilePath());
         _sessionStateRepository = new JsonSessionStateRepository(LayoutStoragePaths.GetDefaultSessionStateFilePath());
         _appSettings = LoadAppSettings();
-        _currentDocument = _editorService.CreateBlank("起始布局");
-        _activeSnapDocument = _currentDocument;
-        _activeSnapLayoutName = "当前编辑布局";
-        _selectedNodeId = _currentDocument.Root.Id;
-        _savedState = new PersistedLayoutState(_currentDocument, _currentLayoutId);
 
         Layouts = new ObservableCollection<LayoutListItemViewModel>();
+        Displays = new ObservableCollection<DisplayItemViewModel>();
+
+        RefreshDisplays();
+
+        _currentWorkspaceDocument = CreateWorkspaceDocument("起始布局");
+        _activeSnapWorkspaceDocument = _currentWorkspaceDocument;
+        _currentDocument = GetDisplayLayout(_currentWorkspaceDocument, GetPrimaryDisplayId());
+        _activeSnapLayoutName = "当前编辑布局";
+        _selectedNodeId = _currentDocument.Root.Id;
+        _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
 
         _undoCommand = new RelayCommand(Undo, () => _undoStack.Count > 0);
         _redoCommand = new RelayCommand(Redo, () => _redoStack.Count > 0);
@@ -71,11 +82,14 @@ public sealed class MainViewModel : ObservableObject
         SplitVerticalCommand = new RelayCommand(() => SplitLeafById(SelectedNodeId, SplitDirection.Vertical));
         DeleteSelectedSplitCommand = new RelayCommand(() => DeleteContainingSplit(SelectedNodeId));
 
+        RefreshDisplays();
         RefreshLayouts();
         TryRestoreLastLayoutOnStartup();
     }
 
     public ObservableCollection<LayoutListItemViewModel> Layouts { get; }
+
+    public ObservableCollection<DisplayItemViewModel> Displays { get; }
 
     public ICommand NewLayoutCommand { get; }
 
@@ -108,8 +122,8 @@ public sealed class MainViewModel : ObservableObject
         {
             if (SetProperty(ref _currentDocument, value))
             {
-                RaisePropertyChanged(nameof(CurrentLayoutName));
                 RaisePropertyChanged(nameof(CanvasSubtitle));
+                RaisePropertyChanged(nameof(StatusLine));
                 RaisePropertyChanged(nameof(SelectionLabel));
             }
         }
@@ -117,18 +131,20 @@ public sealed class MainViewModel : ObservableObject
 
     public string CurrentLayoutName
     {
-        get => CurrentDocument.Name;
+        get => _currentWorkspaceDocument.Name;
         set
         {
             var normalized = NormalizeLayoutName(value);
-            if (normalized == CurrentDocument.Name)
+            if (normalized == _currentWorkspaceDocument.Name)
             {
                 return;
             }
 
             PushUndoState();
             _redoStack.Clear();
-            CurrentDocument = CurrentDocument with { Name = normalized };
+            _currentWorkspaceDocument = RenameWorkspace(_currentWorkspaceDocument, normalized);
+            SyncActiveSnapWithCurrentWorkspaceIfNeeded();
+            CurrentDocument = GetDisplayLayout(_currentWorkspaceDocument, SelectedDisplayItem?.Id);
             UpdateDirtyState();
             UpdateHistoryCommandStates();
         }
@@ -146,24 +162,6 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    public bool IsDirty
-    {
-        get => _isDirty;
-        private set
-        {
-            if (SetProperty(ref _isDirty, value))
-            {
-                RaisePropertyChanged(nameof(DirtyLabel));
-            }
-        }
-    }
-
-    public string? PreviewNodeId
-    {
-        get => _previewNodeId;
-        set => SetProperty(ref _previewNodeId, value);
-    }
-
     public LayoutListItemViewModel? SelectedLayoutItem
     {
         get => _selectedLayoutItem;
@@ -176,11 +174,46 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public DisplayItemViewModel? SelectedDisplayItem
+    {
+        get => _selectedDisplayItem;
+        set
+        {
+            if (ReferenceEquals(_selectedDisplayItem, value))
+            {
+                return;
+            }
+
+            _selectedDisplayItem = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CurrentDisplayName));
+            RaisePropertyChanged(nameof(CurrentDisplaySummary));
+            RaisePropertyChanged(nameof(CanvasSubtitle));
+            RaisePropertyChanged(nameof(StatusLine));
+
+            if (_suppressDisplaySelectionChange || value is null)
+            {
+                return;
+            }
+
+            ActivateDisplay(value.Id, resetHistory: true);
+            SaveSessionState();
+        }
+    }
+
+    public bool IsDirty
+    {
+        get => _isDirty;
+        private set
+        {
+            if (SetProperty(ref _isDirty, value))
+            {
+                RaisePropertyChanged(nameof(DirtyLabel));
+            }
+        }
+    }
+
     public string DirtyLabel => IsDirty ? "未保存修改" : "已保存";
-
-    public LayoutDocument SnapLayoutDocument => _activeSnapDocument;
-
-    public LayoutDocument OverlaySnapDocument => _previewSnapDocument ?? _activeSnapDocument;
 
     public string ActiveSnapLayoutName => _activeSnapLayoutName;
 
@@ -190,21 +223,29 @@ public sealed class MainViewModel : ObservableObject
 
     public string MinimizeShortcut => _appSettings.MinimizeShortcut;
 
+    public string CurrentDisplayName => SelectedDisplayItem?.Name ?? "主屏幕";
+
+    public string CurrentDisplaySummary => SelectedDisplayItem?.Description ?? string.Empty;
+
     public string CanvasSubtitle
     {
         get
         {
-            var fileLabel = _currentLayoutId is null ? "当前是临时草稿" : $"当前文件：{_currentLayoutId}.json";
-            return $"{fileLabel}  |  右键区域继续分割，拖动分割线实时调整比例。";
+            var fileLabel = _currentLayoutId is null ? "当前是临时多屏草稿" : $"当前文件：{_currentLayoutId}.json";
+            return $"编辑屏幕：{CurrentDisplayName}  |  {fileLabel}  |  同一个布局文件会同时保存所有屏幕的分割结果。";
         }
     }
+
+    public string StatusLine => string.IsNullOrWhiteSpace(_lastStatusMessage)
+        ? CanvasSubtitle
+        : $"{CanvasSubtitle}  |  最近操作：{_lastStatusMessage}";
 
     public string SnapLayoutLabel
     {
         get
         {
             var idLabel = string.IsNullOrWhiteSpace(_activeSnapLayoutId) ? "未绑定到已保存布局" : $"{_activeSnapLayoutId}.json";
-            return $"当前吸附布局：{_activeSnapLayoutName}  |  {idLabel}";
+            return $"当前吸附布局：{_activeSnapLayoutName}  |  {idLabel}  |  会在所有屏幕统一生效";
         }
     }
 
@@ -247,6 +288,40 @@ public sealed class MainViewModel : ObservableObject
         SelectedNodeId = nodeId;
     }
 
+    public DisplayInfo GetSelectedDisplay()
+    {
+        return GetDisplayOrPrimary(SelectedDisplayItem?.Id);
+    }
+
+    public IReadOnlyList<DisplayInfo> GetDisplays()
+    {
+        return _displaysById.Values
+            .OrderBy(display => display.Bounds.X)
+            .ThenBy(display => display.Bounds.Y)
+            .ToList();
+    }
+
+    public bool TryGetDisplayById(string? displayId, out DisplayInfo display)
+    {
+        if (!string.IsNullOrWhiteSpace(displayId) && _displaysById.TryGetValue(displayId, out display!))
+        {
+            return true;
+        }
+
+        display = GetSelectedDisplay();
+        return false;
+    }
+
+    public LayoutDocument GetSnapLayoutDocumentForDisplay(string displayId)
+    {
+        return GetDisplayLayout(_activeSnapWorkspaceDocument, displayId);
+    }
+
+    public LayoutDocument GetCurrentLayoutDocumentForDisplay(string displayId)
+    {
+        return GetDisplayLayout(_currentWorkspaceDocument, displayId);
+    }
+
     public void UpdateSplitRatio(string splitNodeId, double ratio)
     {
         var result = _editorService.UpdateSplitRatio(CurrentDocument, splitNodeId, ratio);
@@ -258,53 +333,80 @@ public sealed class MainViewModel : ObservableObject
         ApplyEditorMutation(result.Document, result.SelectedNodeId);
     }
 
-    public void UpdateSnapLayoutSplitRatio(string splitNodeId, double ratio)
+    public bool UpdateSnapLayoutSplitRatioForDisplay(string displayId, string splitNodeId, double ratio, bool persist)
     {
-        var result = _editorService.UpdateSplitRatio(_activeSnapDocument, splitNodeId, ratio);
+        var sourceDocument = GetDisplayLayout(_activeSnapWorkspaceDocument, displayId);
+        var result = _editorService.UpdateSplitRatio(sourceDocument, splitNodeId, ratio);
         if (!result.Changed)
         {
-            return;
+            if (persist)
+            {
+                PersistActiveSnapWorkspaceChange();
+            }
+
+            return false;
         }
 
-        _activeSnapDocument = result.Document;
-        RaisePropertyChanged(nameof(SnapLayoutDocument));
+        _activeSnapWorkspaceDocument = ReplaceDisplayLayout(_activeSnapWorkspaceDocument, displayId, result.Document);
 
-        if (!string.IsNullOrWhiteSpace(_activeSnapLayoutId)
-            && string.Equals(_activeSnapLayoutId, _currentLayoutId, StringComparison.OrdinalIgnoreCase))
+        if (ShouldSyncActiveSnapWithCurrentWorkspace())
         {
-            ApplyEditorMutation(result.Document, result.SelectedNodeId);
+            _currentWorkspaceDocument = ReplaceDisplayLayout(_currentWorkspaceDocument, displayId, result.Document);
+
+            if (string.Equals(displayId, SelectedDisplayItem?.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                CurrentDocument = result.Document;
+                UpdateDirtyState();
+            }
+
+            if (persist)
+            {
+                PersistActiveSnapWorkspaceChange();
+            }
+
+            return true;
+        }
+
+        if (persist)
+        {
+            PersistActiveSnapWorkspaceChange();
+        }
+
+        return true;
+    }
+
+    private void PersistActiveSnapWorkspaceChange()
+    {
+        if (ShouldSyncActiveSnapWithCurrentWorkspace())
+        {
+            if (string.IsNullOrWhiteSpace(_currentLayoutId))
+            {
+                UpdateDirtyState();
+                return;
+            }
+
+            _layoutRepository
+                .SaveAsync(_currentLayoutId, _currentWorkspaceDocument, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+            _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
+            UpdateDirtyState();
             return;
         }
 
         if (string.IsNullOrWhiteSpace(_activeSnapLayoutId))
         {
-            ApplyEditorMutation(result.Document, result.SelectedNodeId);
-        }
-    }
-
-    public bool PreviewSnapLayoutSplitRatio(string splitNodeId, double ratio)
-    {
-        var baseDocument = _previewSnapDocument ?? _activeSnapDocument;
-        var result = _editorService.UpdateSplitRatio(baseDocument, splitNodeId, ratio);
-        if (!result.Changed)
-        {
-            return false;
+            return;
         }
 
-        _previewSnapDocument = result.Document;
-        RaisePropertyChanged(nameof(OverlaySnapDocument));
-        return true;
+        _layoutRepository
+            .SaveAsync(_activeSnapLayoutId, _activeSnapWorkspaceDocument, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
     }
 
     public void ResetSnapLayoutPreview()
     {
-        if (_previewSnapDocument is null)
-        {
-            return;
-        }
-
-        _previewSnapDocument = null;
-        RaisePropertyChanged(nameof(OverlaySnapDocument));
     }
 
     public void OpenSettings()
@@ -394,19 +496,35 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        CurrentDocument = _editorService.CreateBlank($"布局 {Layouts.Count + 1}");
+        _currentWorkspaceDocument = CreateWorkspaceDocument($"布局 {Layouts.Count + 1}");
         _currentLayoutId = null;
-        SelectedNodeId = CurrentDocument.Root.Id;
-        _savedState = new PersistedLayoutState(CurrentDocument, _currentLayoutId);
+        _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
         IsDirty = false;
         ResetHistory();
-        RaisePropertyChanged(nameof(CanvasSubtitle));
+        SyncActiveSnapWithCurrentWorkspaceIfNeeded();
+        ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: false);
+        SaveSessionState();
     }
 
-    private void SaveCurrentLayout()
+    private async void SaveCurrentLayout()
     {
-        var targetId = Slugify(CurrentDocument.Name);
-        SaveToTarget(targetId, CurrentDocument.Name, treatAsSaveAs: false, notifyOnSuccess: true);
+        if (_isSavingLayout)
+        {
+            return;
+        }
+
+        var targetId = Slugify(CurrentLayoutName);
+        _isSavingLayout = true;
+        SetStatusMessage("正在保存布局...");
+
+        try
+        {
+            await SaveToTargetAsync(targetId, CurrentLayoutName, treatAsSaveAs: false, notifyOnSuccess: false);
+        }
+        finally
+        {
+            _isSavingLayout = false;
+        }
     }
 
     private void ApplyCurrentLayoutToWindows()
@@ -415,9 +533,8 @@ public sealed class MainViewModel : ObservableObject
         {
             var owner = GetOwnerWindow();
             var excludedHandle = owner is null ? IntPtr.Zero : new WindowInteropHelper(owner).Handle;
-            var workArea = SystemParameters.WorkArea;
-            var rootBounds = new PaneRect(workArea.Left, workArea.Top, workArea.Width, workArea.Height);
-            var result = _workspaceApplyService.Apply(SnapLayoutDocument, rootBounds, excludedHandle);
+            var targetDisplay = GetSelectedDisplay();
+            var result = _workspaceApplyService.Apply(CurrentDocument, targetDisplay.WorkArea, excludedHandle);
 
             if (result.AppliedWindowCount == 0)
             {
@@ -425,7 +542,7 @@ public sealed class MainViewModel : ObservableObject
                 return;
             }
 
-            ShowInfoMessage($"已按当前布局排列 {result.AppliedWindowCount} 个窗口，剩余空白区域 {result.UnusedRegionCount} 个，未排入窗口 {result.SkippedWindowCount} 个。");
+            ShowInfoMessage($"已按 {targetDisplay.Name} 当前布局排列 {result.AppliedWindowCount} 个窗口。多屏整包保存已经生效，应用按钮仍按当前屏幕单独测试。");
         }
         catch (Exception ex)
         {
@@ -433,9 +550,14 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private void SaveCurrentLayoutAs()
+    private async void SaveCurrentLayoutAs()
     {
-        var enteredName = PromptForLayoutName("布局另存为", "请输入新布局名称。", CurrentDocument.Name);
+        if (_isSavingLayout)
+        {
+            return;
+        }
+
+        var enteredName = PromptForLayoutName("布局另存为", "请输入新布局名称。", CurrentLayoutName);
         if (enteredName is null)
         {
             return;
@@ -443,7 +565,17 @@ public sealed class MainViewModel : ObservableObject
 
         var targetName = NormalizeLayoutName(enteredName);
         var targetId = Slugify(targetName);
-        SaveToTarget(targetId, targetName, treatAsSaveAs: true, notifyOnSuccess: true);
+        _isSavingLayout = true;
+        SetStatusMessage("正在另存布局...");
+
+        try
+        {
+            await SaveToTargetAsync(targetId, targetName, treatAsSaveAs: true, notifyOnSuccess: false);
+        }
+        finally
+        {
+            _isSavingLayout = false;
+        }
     }
 
     private void SetSelectedLayoutAsSnapLayout()
@@ -470,19 +602,20 @@ public sealed class MainViewModel : ObservableObject
 
         try
         {
-            var document = _layoutRepository
-                .LoadAsync(SelectedLayoutItem.Id, CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
+            var workspace = NormalizeWorkspaceForCurrentDisplays(
+                _layoutRepository
+                    .LoadAsync(SelectedLayoutItem.Id, CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult());
 
-            CurrentDocument = document;
+            _currentWorkspaceDocument = workspace;
             _currentLayoutId = SelectedLayoutItem.Id;
-            SelectedNodeId = CurrentDocument.Root.Id;
-            _savedState = new PersistedLayoutState(CurrentDocument, _currentLayoutId);
+            _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
             IsDirty = false;
             ResetHistory();
-            SaveSessionState(_currentLayoutId, _activeSnapLayoutId);
-            RaisePropertyChanged(nameof(CanvasSubtitle));
+            SyncActiveSnapWithCurrentWorkspaceIfNeeded();
+            ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: false);
+            SaveSessionState();
         }
         catch (Exception ex)
         {
@@ -497,6 +630,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
+        var deletedLayoutId = SelectedLayoutItem.Id;
         var confirmed = ShowMessage($"确定删除布局“{SelectedLayoutItem.Name}”吗？", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (confirmed != MessageBoxResult.Yes)
         {
@@ -506,27 +640,27 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             _layoutRepository
-                .DeleteAsync(SelectedLayoutItem.Id, CancellationToken.None)
+                .DeleteAsync(deletedLayoutId, CancellationToken.None)
                 .GetAwaiter()
                 .GetResult();
 
-            if (_currentLayoutId == SelectedLayoutItem.Id)
+            if (string.Equals(_currentLayoutId, deletedLayoutId, StringComparison.OrdinalIgnoreCase))
             {
-                CurrentDocument = _editorService.CreateBlank("起始布局");
+                _currentWorkspaceDocument = CreateWorkspaceDocument("起始布局");
                 _currentLayoutId = null;
-                SelectedNodeId = CurrentDocument.Root.Id;
-                _savedState = new PersistedLayoutState(CurrentDocument, _currentLayoutId);
+                _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
                 IsDirty = false;
                 ResetHistory();
-                SaveSessionState(null, string.Equals(_activeSnapLayoutId, SelectedLayoutItem.Id, StringComparison.OrdinalIgnoreCase) ? null : _activeSnapLayoutId);
+                ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: false);
             }
 
-            if (string.Equals(_activeSnapLayoutId, SelectedLayoutItem.Id, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(_activeSnapLayoutId, deletedLayoutId, StringComparison.OrdinalIgnoreCase))
             {
-                SetActiveSnapLayout(null, "当前编辑布局", CurrentDocument);
+                SetActiveSnapWorkspace(_currentLayoutId, _currentWorkspaceDocument.Name, _currentWorkspaceDocument);
             }
 
             RefreshLayouts();
+            SaveSessionState();
         }
         catch (Exception ex)
         {
@@ -594,6 +728,7 @@ public sealed class MainViewModel : ObservableObject
     private bool SaveToTarget(string targetId, string targetName, bool treatAsSaveAs, bool notifyOnSuccess)
     {
         var previousId = _currentLayoutId;
+        var tracksCurrentAsSnap = ShouldSyncActiveSnapWithCurrentWorkspace();
         var willRenameCurrentFile = !treatAsSaveAs
             && !string.IsNullOrWhiteSpace(previousId)
             && !string.Equals(previousId, targetId, StringComparison.OrdinalIgnoreCase);
@@ -611,12 +746,13 @@ public sealed class MainViewModel : ObservableObject
             }
         }
 
-        var documentToSave = CurrentDocument with { Name = targetName };
+        var workspaceToSave = RenameWorkspace(_currentWorkspaceDocument, targetName);
 
         try
         {
+            PaneWorksLog.Info($"Save layout sync start: {targetId}");
             _layoutRepository
-                .SaveAsync(targetId, documentToSave, CancellationToken.None)
+                .SaveAsync(targetId, workspaceToSave, CancellationToken.None)
                 .GetAwaiter()
                 .GetResult();
 
@@ -627,33 +763,111 @@ public sealed class MainViewModel : ObservableObject
                     .GetAwaiter()
                     .GetResult();
             }
+            PaneWorksLog.Info($"Save layout sync done: {targetId}");
         }
         catch (Exception ex)
         {
+            PaneWorksLog.Error($"Save layout sync failed: {targetId}", ex);
             ShowErrorMessage($"保存布局失败：{ex.Message}");
             return false;
         }
 
-        CurrentDocument = documentToSave;
+        _currentWorkspaceDocument = workspaceToSave;
         _currentLayoutId = targetId;
-        _savedState = new PersistedLayoutState(CurrentDocument, _currentLayoutId);
+        _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
         IsDirty = false;
 
-        if (string.Equals(_activeSnapLayoutId, previousId, StringComparison.OrdinalIgnoreCase)
-            || (string.IsNullOrWhiteSpace(_activeSnapLayoutId) && ReferenceEquals(_activeSnapDocument, CurrentDocument)))
+        if (tracksCurrentAsSnap)
         {
-            SetActiveSnapLayout(targetId, targetName, documentToSave);
+            SetActiveSnapWorkspace(targetId, targetName, _currentWorkspaceDocument);
         }
 
-        SaveSessionState(_currentLayoutId, _activeSnapLayoutId);
+        ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: false);
+        SaveSessionState();
 
         RefreshLayouts();
         SelectedLayoutItem = Layouts.FirstOrDefault(item => item.Id == _currentLayoutId);
-        RaisePropertyChanged(nameof(CanvasSubtitle));
 
         if (notifyOnSuccess)
         {
-            ShowInfoMessage($"布局“{targetName}”已保存。");
+            ShowInfoMessage($"多屏布局“{targetName}”已保存。当前所有屏幕的编辑结果都会写进同一个文件。");
+        }
+
+        if (!notifyOnSuccess)
+        {
+            SetStatusMessage($"多屏布局“{targetName}”已保存");
+        }
+
+        return true;
+    }
+
+    private async Task<bool> SaveToTargetAsync(string targetId, string targetName, bool treatAsSaveAs, bool notifyOnSuccess)
+    {
+        var previousId = _currentLayoutId;
+        var tracksCurrentAsSnap = ShouldSyncActiveSnapWithCurrentWorkspace();
+        var willRenameCurrentFile = !treatAsSaveAs
+            && !string.IsNullOrWhiteSpace(previousId)
+            && !string.Equals(previousId, targetId, StringComparison.OrdinalIgnoreCase);
+
+        var shouldOverwrite = Layouts.Any(item =>
+            string.Equals(item.Id, targetId, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(item.Id, previousId, StringComparison.OrdinalIgnoreCase));
+
+        if (shouldOverwrite)
+        {
+            var overwrite = ShowMessage($"已存在名为“{targetName}”的布局，是否覆盖？", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (overwrite != MessageBoxResult.Yes)
+            {
+                return false;
+            }
+        }
+
+        var workspaceToSave = RenameWorkspace(_currentWorkspaceDocument, targetName);
+
+        try
+        {
+            PaneWorksLog.Info($"Save layout async start: {targetId}");
+            await _layoutRepository
+                .SaveAsync(targetId, workspaceToSave, CancellationToken.None);
+
+            if (willRenameCurrentFile)
+            {
+                await _layoutRepository
+                    .DeleteAsync(previousId!, CancellationToken.None);
+            }
+            PaneWorksLog.Info($"Save layout async done: {targetId}");
+        }
+        catch (Exception ex)
+        {
+            PaneWorksLog.Error($"Save layout async failed: {targetId}", ex);
+            ShowErrorMessage($"保存布局失败：{ex.Message}");
+            return false;
+        }
+
+        _currentWorkspaceDocument = workspaceToSave;
+        _currentLayoutId = targetId;
+        _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
+        IsDirty = false;
+
+        if (tracksCurrentAsSnap)
+        {
+            SetActiveSnapWorkspace(targetId, targetName, _currentWorkspaceDocument);
+        }
+
+        ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: false);
+        SaveSessionState();
+
+        await RefreshLayoutsAsync();
+        SelectedLayoutItem = Layouts.FirstOrDefault(item => item.Id == _currentLayoutId);
+
+        if (notifyOnSuccess)
+        {
+            ShowInfoMessage($"多屏布局“{targetName}”已保存。当前所有屏幕的编辑结果都会写进同一个文件。");
+        }
+
+        if (!notifyOnSuccess)
+        {
+            SetStatusMessage($"多屏布局“{targetName}”已保存");
         }
 
         return true;
@@ -666,7 +880,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        _redoStack.Push(new EditorHistoryState(CurrentDocument, SelectedNodeId));
+        _redoStack.Push(new EditorHistoryState(_currentWorkspaceDocument, SelectedNodeId));
         RestoreHistoryState(_undoStack.Pop());
     }
 
@@ -677,8 +891,30 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        _undoStack.Push(new EditorHistoryState(CurrentDocument, SelectedNodeId));
+        _undoStack.Push(new EditorHistoryState(_currentWorkspaceDocument, SelectedNodeId));
         RestoreHistoryState(_redoStack.Pop());
+    }
+
+    private void RefreshDisplays()
+    {
+        var discoveredDisplays = _displayDiscoveryService.GetDisplays();
+        var previousDisplayId = _selectedDisplayItem?.Id;
+
+        _displaysById.Clear();
+        Displays.Clear();
+
+        foreach (var display in discoveredDisplays)
+        {
+            _displaysById[display.Id] = display;
+            Displays.Add(new DisplayItemViewModel
+            {
+                Id = display.Id,
+                Name = display.Name,
+                Description = $"{(display.IsPrimary ? "主屏" : "扩展屏")}  |  {display.Bounds.Width:0} × {display.Bounds.Height:0}"
+            });
+        }
+
+        SetSelectedDisplayItemSilently(previousDisplayId ?? GetPrimaryDisplayId());
     }
 
     private void RefreshLayouts()
@@ -687,6 +923,19 @@ public sealed class MainViewModel : ObservableObject
             .ListAsync(CancellationToken.None)
             .GetAwaiter()
             .GetResult();
+
+        ApplyLayoutListItems(items);
+    }
+
+    private async Task RefreshLayoutsAsync()
+    {
+        var items = await _layoutRepository.ListAsync(CancellationToken.None);
+
+        ApplyLayoutListItems(items);
+    }
+
+    private void ApplyLayoutListItems(IReadOnlyList<LayoutListItem> items)
+    {
 
         var selectedId = SelectedLayoutItem?.Id ?? _currentLayoutId;
 
@@ -698,7 +947,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 Id = item.Id,
                 Name = item.Name,
-                Description = $"已保存文件：{item.Id}.json"
+                Description = $"多屏布局文件：{item.Id}.json"
             });
         }
 
@@ -708,70 +957,47 @@ public sealed class MainViewModel : ObservableObject
     private void TryRestoreLastLayoutOnStartup()
     {
         var sessionState = _sessionStateRepository.Load();
+        SetSelectedDisplayItemSilently(sessionState.SelectedDisplayId ?? GetPrimaryDisplayId());
+
         if (!string.IsNullOrWhiteSpace(sessionState.LastLayoutId))
         {
-            var matchingLayout = Layouts.FirstOrDefault(item =>
-                string.Equals(item.Id, sessionState.LastLayoutId, StringComparison.OrdinalIgnoreCase));
-
-            if (matchingLayout is null)
+            try
             {
-                SaveSessionState(null, sessionState.LastSnapLayoutId);
+                _currentWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(
+                    _layoutRepository.LoadAsync(sessionState.LastLayoutId, CancellationToken.None).GetAwaiter().GetResult());
+                _currentLayoutId = sessionState.LastLayoutId;
             }
-            else
+            catch
             {
-                try
-                {
-                    var document = _layoutRepository
-                        .LoadAsync(matchingLayout.Id, CancellationToken.None)
-                        .GetAwaiter()
-                        .GetResult();
-
-                    CurrentDocument = document;
-                    _currentLayoutId = matchingLayout.Id;
-                    SelectedNodeId = CurrentDocument.Root.Id;
-                    _savedState = new PersistedLayoutState(CurrentDocument, _currentLayoutId);
-                    IsDirty = false;
-                    ResetHistory();
-                    SelectedLayoutItem = matchingLayout;
-                    RaisePropertyChanged(nameof(CanvasSubtitle));
-                }
-                catch
-                {
-                    SaveSessionState(null, sessionState.LastSnapLayoutId);
-                }
+                _currentWorkspaceDocument = CreateWorkspaceDocument("起始布局");
+                _currentLayoutId = null;
             }
         }
 
-        if (string.IsNullOrWhiteSpace(sessionState.LastSnapLayoutId))
+        _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
+        IsDirty = false;
+
+        if (!string.IsNullOrWhiteSpace(sessionState.LastSnapLayoutId))
         {
-            SetActiveSnapLayout(_currentLayoutId, CurrentDocument.Name, CurrentDocument);
-            return;
+            try
+            {
+                var snapWorkspace = NormalizeWorkspaceForCurrentDisplays(
+                    _layoutRepository.LoadAsync(sessionState.LastSnapLayoutId, CancellationToken.None).GetAwaiter().GetResult());
+                SetActiveSnapWorkspace(sessionState.LastSnapLayoutId, snapWorkspace.Name, snapWorkspace);
+            }
+            catch
+            {
+                SetActiveSnapWorkspace(_currentLayoutId, _currentWorkspaceDocument.Name, _currentWorkspaceDocument);
+            }
+        }
+        else
+        {
+            SetActiveSnapWorkspace(_currentLayoutId, _currentWorkspaceDocument.Name, _currentWorkspaceDocument);
         }
 
-        var snapLayout = Layouts.FirstOrDefault(item =>
-            string.Equals(item.Id, sessionState.LastSnapLayoutId, StringComparison.OrdinalIgnoreCase));
-
-        if (snapLayout is null)
-        {
-            SetActiveSnapLayout(_currentLayoutId, CurrentDocument.Name, CurrentDocument);
-            SaveSessionState(_currentLayoutId, null);
-            return;
-        }
-
-        try
-        {
-            var snapDocument = _layoutRepository
-                .LoadAsync(snapLayout.Id, CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
-
-            SetActiveSnapLayout(snapLayout.Id, snapDocument.Name, snapDocument);
-        }
-        catch
-        {
-            SetActiveSnapLayout(_currentLayoutId, CurrentDocument.Name, CurrentDocument);
-            SaveSessionState(_currentLayoutId, null);
-        }
+        ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: true);
+        SelectedLayoutItem = Layouts.FirstOrDefault(item => item.Id == _currentLayoutId);
+        SaveSessionState();
     }
 
     private bool ResolvePendingChanges(string actionLabel)
@@ -792,30 +1018,34 @@ public sealed class MainViewModel : ObservableObject
             return true;
         }
 
-        return SaveToTarget(Slugify(CurrentDocument.Name), CurrentDocument.Name, treatAsSaveAs: false, notifyOnSuccess: false);
+        return SaveToTarget(Slugify(CurrentLayoutName), CurrentLayoutName, treatAsSaveAs: false, notifyOnSuccess: false);
     }
 
     private void ApplyEditorMutation(LayoutDocument document, string? selectedNodeId)
     {
         PushUndoState();
         _redoStack.Clear();
+        _currentWorkspaceDocument = ReplaceDisplayLayout(_currentWorkspaceDocument, SelectedDisplayItem?.Id, document);
         CurrentDocument = document;
         SelectedNodeId = selectedNodeId;
+        SyncActiveSnapWithCurrentWorkspaceIfNeeded();
         UpdateDirtyState();
         UpdateHistoryCommandStates();
     }
 
     private void RestoreHistoryState(EditorHistoryState state)
     {
-        CurrentDocument = state.Document;
+        _currentWorkspaceDocument = state.WorkspaceDocument;
+        CurrentDocument = GetDisplayLayout(_currentWorkspaceDocument, SelectedDisplayItem?.Id);
         SelectedNodeId = state.SelectedNodeId;
+        SyncActiveSnapWithCurrentWorkspaceIfNeeded();
         UpdateDirtyState();
         UpdateHistoryCommandStates();
     }
 
     private void PushUndoState()
     {
-        _undoStack.Push(new EditorHistoryState(CurrentDocument, SelectedNodeId));
+        _undoStack.Push(new EditorHistoryState(_currentWorkspaceDocument, SelectedNodeId));
     }
 
     private void ResetHistory()
@@ -827,7 +1057,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void UpdateDirtyState()
     {
-        IsDirty = !Equals(_savedState, new PersistedLayoutState(CurrentDocument, _currentLayoutId));
+        IsDirty = !Equals(_savedState, new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId));
     }
 
     private void UpdateHistoryCommandStates()
@@ -836,20 +1066,20 @@ public sealed class MainViewModel : ObservableObject
         _redoCommand.RaiseCanExecuteChanged();
     }
 
-    private void SaveSessionState(string? layoutId, string? snapLayoutId)
+    private void SaveSessionState()
     {
-        _sessionStateRepository.Save(new SessionState(layoutId, snapLayoutId));
+        _sessionStateRepository.Save(new SessionState
+        {
+            LastLayoutId = _currentLayoutId,
+            LastSnapLayoutId = _activeSnapLayoutId,
+            SelectedDisplayId = SelectedDisplayItem?.Id
+        });
     }
 
-    private void SetActiveSnapLayout(string? layoutId, string layoutName, LayoutDocument document)
+    private void SetStatusMessage(string message)
     {
-        _activeSnapLayoutId = layoutId;
-        _activeSnapLayoutName = layoutName;
-        _activeSnapDocument = document;
-        RaisePropertyChanged(nameof(ActiveSnapLayoutName));
-        RaisePropertyChanged(nameof(ActiveSnapLayoutId));
-        RaisePropertyChanged(nameof(SnapLayoutDocument));
-        RaisePropertyChanged(nameof(SnapLayoutLabel));
+        _lastStatusMessage = message;
+        RaisePropertyChanged(nameof(StatusLine));
     }
 
     private AppSettings LoadAppSettings()
@@ -882,18 +1112,21 @@ public sealed class MainViewModel : ObservableObject
 
         try
         {
-            var document = _layoutRepository
-                .LoadAsync(selectedItem.Id, CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
+            var workspace = NormalizeWorkspaceForCurrentDisplays(
+                _layoutRepository.LoadAsync(selectedItem.Id, CancellationToken.None).GetAwaiter().GetResult());
 
             SelectedLayoutItem = selectedItem;
-            SetActiveSnapLayout(selectedItem.Id, document.Name, document);
-            SaveSessionState(_currentLayoutId, _activeSnapLayoutId);
+            SetActiveSnapWorkspace(selectedItem.Id, workspace.Name, workspace);
+            SaveSessionState();
 
             if (notifyOnSuccess)
             {
-                ShowInfoMessage($"当前吸附布局已切换为“{document.Name}”。");
+                ShowInfoMessage($"当前吸附布局已切换为“{workspace.Name}”。这套多屏布局会直接用于后续所有屏幕吸附。");
+            }
+
+            if (!notifyOnSuccess)
+            {
+                SetStatusMessage($"当前吸附布局已切换为“{workspace.Name}”");
             }
 
             return true;
@@ -903,6 +1136,166 @@ public sealed class MainViewModel : ObservableObject
             ShowErrorMessage($"设置吸附布局失败：{ex.Message}");
             return false;
         }
+    }
+
+    private void ActivateDisplay(string? displayId, bool resetHistory)
+    {
+        if (!TryGetDisplayById(displayId, out var display))
+        {
+            return;
+        }
+
+        _currentWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(_currentWorkspaceDocument);
+        CurrentDocument = GetDisplayLayout(_currentWorkspaceDocument, display.Id);
+        SelectedNodeId = CurrentDocument.Root.Id;
+
+        if (resetHistory)
+        {
+            ResetHistory();
+        }
+
+        SetSelectedDisplayItemSilently(display.Id);
+        RaisePropertyChanged(nameof(CanvasSubtitle));
+        RaisePropertyChanged(nameof(StatusLine));
+    }
+
+    private WorkspaceLayoutDocument CreateWorkspaceDocument(string name)
+    {
+        var normalizedName = NormalizeLayoutName(name);
+        var layouts = new Dictionary<string, LayoutDocument>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var display in _displaysById.Values)
+        {
+            layouts[display.Id] = _editorService.CreateBlank(normalizedName);
+        }
+
+        return new WorkspaceLayoutDocument(1, normalizedName, layouts);
+    }
+
+    private WorkspaceLayoutDocument NormalizeWorkspaceForCurrentDisplays(WorkspaceLayoutDocument workspace)
+    {
+        var normalizedName = NormalizeLayoutName(workspace.Name);
+        var layouts = workspace.DisplayLayouts is null
+            ? new Dictionary<string, LayoutDocument>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, LayoutDocument>(workspace.DisplayLayouts, StringComparer.OrdinalIgnoreCase);
+
+        var exactMatches = layouts.Keys.Count(key => _displaysById.ContainsKey(key));
+        var fallback = layouts.Values.FirstOrDefault();
+
+        foreach (var display in _displaysById.Values)
+        {
+            if (layouts.ContainsKey(display.Id))
+            {
+                continue;
+            }
+
+            if (fallback is not null && exactMatches == 0 && display.IsPrimary)
+            {
+                layouts[display.Id] = fallback with { Name = normalizedName };
+                continue;
+            }
+
+            layouts[display.Id] = _editorService.CreateBlank(normalizedName);
+        }
+
+        return new WorkspaceLayoutDocument(workspace.Version, normalizedName, layouts);
+    }
+
+    private LayoutDocument GetDisplayLayout(WorkspaceLayoutDocument workspace, string? displayId)
+    {
+        workspace = NormalizeWorkspaceForCurrentDisplays(workspace);
+        var resolvedDisplayId = !string.IsNullOrWhiteSpace(displayId) && workspace.DisplayLayouts.ContainsKey(displayId)
+            ? displayId
+            : GetPrimaryDisplayId();
+
+        if (workspace.DisplayLayouts.TryGetValue(resolvedDisplayId, out var layout))
+        {
+            return layout;
+        }
+
+        return workspace.DisplayLayouts.Values.FirstOrDefault() ?? _editorService.CreateBlank(workspace.Name);
+    }
+
+    private WorkspaceLayoutDocument ReplaceDisplayLayout(WorkspaceLayoutDocument workspace, string? displayId, LayoutDocument document)
+    {
+        workspace = NormalizeWorkspaceForCurrentDisplays(workspace);
+        var resolvedDisplayId = !string.IsNullOrWhiteSpace(displayId) ? displayId : GetPrimaryDisplayId();
+        var layouts = new Dictionary<string, LayoutDocument>(workspace.DisplayLayouts, StringComparer.OrdinalIgnoreCase)
+        {
+            [resolvedDisplayId] = document
+        };
+
+        return workspace with { DisplayLayouts = layouts };
+    }
+
+    private WorkspaceLayoutDocument RenameWorkspace(WorkspaceLayoutDocument workspace, string newName)
+    {
+        var normalizedName = NormalizeLayoutName(newName);
+        var layouts = workspace.DisplayLayouts.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value with { Name = normalizedName },
+            StringComparer.OrdinalIgnoreCase);
+
+        return workspace with
+        {
+            Name = normalizedName,
+            DisplayLayouts = layouts
+        };
+    }
+
+    private void SetActiveSnapWorkspace(string? layoutId, string layoutName, WorkspaceLayoutDocument workspace)
+    {
+        _activeSnapLayoutId = layoutId;
+        _activeSnapLayoutName = layoutName;
+        _activeSnapWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(workspace);
+        RaisePropertyChanged(nameof(ActiveSnapLayoutName));
+        RaisePropertyChanged(nameof(ActiveSnapLayoutId));
+        RaisePropertyChanged(nameof(SnapLayoutLabel));
+    }
+
+    private bool ShouldSyncActiveSnapWithCurrentWorkspace()
+    {
+        return string.IsNullOrWhiteSpace(_activeSnapLayoutId)
+            || string.Equals(_activeSnapLayoutId, _currentLayoutId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void SyncActiveSnapWithCurrentWorkspaceIfNeeded()
+    {
+        if (!ShouldSyncActiveSnapWithCurrentWorkspace())
+        {
+            return;
+        }
+
+        SetActiveSnapWorkspace(_currentLayoutId, _currentWorkspaceDocument.Name, _currentWorkspaceDocument);
+    }
+
+    private void SetSelectedDisplayItemSilently(string displayId)
+    {
+        var selected = Displays.FirstOrDefault(item => string.Equals(item.Id, displayId, StringComparison.OrdinalIgnoreCase));
+        _suppressDisplaySelectionChange = true;
+        _selectedDisplayItem = selected;
+        RaisePropertyChanged(nameof(SelectedDisplayItem));
+        RaisePropertyChanged(nameof(CurrentDisplayName));
+        RaisePropertyChanged(nameof(CurrentDisplaySummary));
+        RaisePropertyChanged(nameof(CanvasSubtitle));
+        RaisePropertyChanged(nameof(StatusLine));
+        _suppressDisplaySelectionChange = false;
+    }
+
+    private string GetPrimaryDisplayId()
+    {
+        return _displaysById.Values.FirstOrDefault(display => display.IsPrimary)?.Id
+            ?? _displaysById.Keys.First();
+    }
+
+    private DisplayInfo GetDisplayOrPrimary(string? displayId)
+    {
+        if (!string.IsNullOrWhiteSpace(displayId) && _displaysById.TryGetValue(displayId, out var display))
+        {
+            return display;
+        }
+
+        return _displayDiscoveryService.GetPrimaryDisplay();
     }
 
     private static AppSettings NormalizeAppSettings(AppSettings settings)
@@ -1003,7 +1396,7 @@ public sealed class MainViewModel : ObservableObject
         return string.IsNullOrWhiteSpace(cleaned) ? "layout" : cleaned;
     }
 
-    private sealed record EditorHistoryState(LayoutDocument Document, string? SelectedNodeId);
+    private sealed record EditorHistoryState(WorkspaceLayoutDocument WorkspaceDocument, string? SelectedNodeId);
 
-    private sealed record PersistedLayoutState(LayoutDocument Document, string? LayoutId);
+    private sealed record PersistedWorkspaceState(WorkspaceLayoutDocument WorkspaceDocument, string? LayoutId);
 }

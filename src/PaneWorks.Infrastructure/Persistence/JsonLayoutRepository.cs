@@ -6,6 +6,8 @@ namespace PaneWorks.Infrastructure.Persistence;
 
 public sealed class JsonLayoutRepository : ILayoutRepository
 {
+    private const string LegacyDisplayKey = "__legacy__";
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true
@@ -28,7 +30,7 @@ public sealed class JsonLayoutRepository : ILayoutRepository
             .Select(file =>
             {
                 var id = Path.GetFileNameWithoutExtension(file.Name);
-                var name = ReadLayoutName(file.FullName) ?? id;
+                var name = ReadWorkspaceLayoutName(file.FullName) ?? id;
 
                 return new LayoutListItem(
                     id,
@@ -42,24 +44,43 @@ public sealed class JsonLayoutRepository : ILayoutRepository
         return Task.FromResult<IReadOnlyList<LayoutListItem>>(items);
     }
 
-    public async Task<LayoutDocument> LoadAsync(string id, CancellationToken cancellationToken)
+    public async Task<WorkspaceLayoutDocument> LoadAsync(string id, CancellationToken cancellationToken)
     {
         var path = GetPath(id);
-        using var stream = File.OpenRead(path);
-        var document = await JsonSerializer
-            .DeserializeAsync<LayoutDocument>(stream, SerializerOptions, cancellationToken)
-            .ConfigureAwait(false);
-        return document ?? throw new InvalidOperationException($"Unable to load layout '{id}'.");
+        await using var stream = File.OpenRead(path);
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);
+        var jsonBytes = memory.ToArray();
+
+        var workspace = TryDeserializeWorkspace(jsonBytes);
+        if (workspace is not null)
+        {
+            return NormalizeWorkspace(workspace);
+        }
+
+        var legacy = TryDeserializeLegacy(jsonBytes);
+        if (legacy is not null)
+        {
+            return new WorkspaceLayoutDocument(
+                legacy.Version,
+                legacy.Name,
+                new Dictionary<string, LayoutDocument>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [LegacyDisplayKey] = legacy
+                });
+        }
+
+        throw new InvalidOperationException($"Unable to load layout '{id}'.");
     }
 
-    public async Task SaveAsync(string id, LayoutDocument document, CancellationToken cancellationToken)
+    public async Task SaveAsync(string id, WorkspaceLayoutDocument document, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_layoutsDirectory);
         var path = GetPath(id);
 
-        using var stream = File.Create(path);
+        await using var stream = File.Create(path);
         await JsonSerializer
-            .SerializeAsync(stream, document, SerializerOptions, cancellationToken)
+            .SerializeAsync(stream, NormalizeWorkspace(document), SerializerOptions, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -82,14 +103,12 @@ public sealed class JsonLayoutRepository : ILayoutRepository
             return Task.CompletedTask;
         }
 
-        var document = JsonSerializer.Deserialize<LayoutDocument>(File.ReadAllText(oldPath), SerializerOptions)
-            ?? throw new InvalidOperationException($"Unable to load layout '{id}' for rename.");
-
-        var renamedDocument = document with { Name = newName };
+        var workspace = LoadAsync(id, cancellationToken).GetAwaiter().GetResult();
+        var renamedWorkspace = workspace with { Name = newName };
         var newId = Slugify(newName);
         var newPath = GetPath(newId);
 
-        File.WriteAllText(newPath, JsonSerializer.Serialize(renamedDocument, SerializerOptions));
+        File.WriteAllText(newPath, JsonSerializer.Serialize(renamedWorkspace, SerializerOptions));
 
         if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase) && File.Exists(oldPath))
         {
@@ -104,18 +123,58 @@ public sealed class JsonLayoutRepository : ILayoutRepository
         return Path.Combine(_layoutsDirectory, $"{id}.json");
     }
 
-    private static string? ReadLayoutName(string path)
+    private static WorkspaceLayoutDocument? TryDeserializeWorkspace(byte[] jsonBytes)
     {
         try
         {
-            using var stream = File.OpenRead(path);
-            var document = JsonSerializer.Deserialize<LayoutDocument>(stream, SerializerOptions);
-            return document?.Name;
+            return JsonSerializer.Deserialize<WorkspaceLayoutDocument>(jsonBytes, SerializerOptions);
         }
         catch
         {
             return null;
         }
+    }
+
+    private static LayoutDocument? TryDeserializeLegacy(byte[] jsonBytes)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<LayoutDocument>(jsonBytes, SerializerOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadWorkspaceLayoutName(string path)
+    {
+        try
+        {
+            var bytes = File.ReadAllBytes(path);
+            var workspace = TryDeserializeWorkspace(bytes);
+            if (workspace is not null && !string.IsNullOrWhiteSpace(workspace.Name))
+            {
+                return workspace.Name;
+            }
+
+            var legacy = TryDeserializeLegacy(bytes);
+            return legacy?.Name;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static WorkspaceLayoutDocument NormalizeWorkspace(WorkspaceLayoutDocument document)
+    {
+        return document with
+        {
+            DisplayLayouts = document.DisplayLayouts is null
+                ? new Dictionary<string, LayoutDocument>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, LayoutDocument>(document.DisplayLayouts, StringComparer.OrdinalIgnoreCase)
+        };
     }
 
     private static string Slugify(string value)

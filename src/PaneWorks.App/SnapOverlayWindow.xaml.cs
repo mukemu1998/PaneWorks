@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Interop;
+using PaneWorks.Core.Models;
 
 namespace PaneWorks.App;
 
@@ -13,6 +14,24 @@ public partial class SnapOverlayWindow : Window
     {
         InitializeComponent();
         SourceInitialized += SnapOverlayWindow_SourceInitialized;
+    }
+
+    public LayoutDocument? Document
+    {
+        get => OverlayCanvas.Document;
+        set => OverlayCanvas.Document = value;
+    }
+
+    public string? PreviewNodeId
+    {
+        get => OverlayCanvas.PreviewNodeId;
+        set => OverlayCanvas.PreviewNodeId = value;
+    }
+
+    public PaneRect StageBounds
+    {
+        get => OverlayCanvas.StageBounds;
+        set => OverlayCanvas.StageBounds = value;
     }
 
     private void SnapOverlayWindow_SourceInitialized(object? sender, EventArgs e)

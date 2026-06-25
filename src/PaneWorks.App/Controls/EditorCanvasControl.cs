@@ -57,6 +57,20 @@ public sealed class EditorCanvasControl : FrameworkElement
             typeof(EditorCanvasControl),
             new FrameworkPropertyMetadata(string.Empty));
 
+    public static readonly DependencyProperty StageBoundsProperty =
+        DependencyProperty.Register(
+            nameof(StageBounds),
+            typeof(PaneRect),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(default(PaneRect), FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty ReferenceLayoutsProperty =
+        DependencyProperty.Register(
+            nameof(ReferenceLayouts),
+            typeof(IEnumerable<EditorReferenceLayout>),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
     private readonly LayoutGeometryCalculator _geometryCalculator = new();
     private readonly SplitResizeService _splitResizeService = new();
 
@@ -100,6 +114,18 @@ public sealed class EditorCanvasControl : FrameworkElement
         set => SetValue(ActiveSnapLayoutIdProperty, value);
     }
 
+    public PaneRect StageBounds
+    {
+        get => (PaneRect)GetValue(StageBoundsProperty);
+        set => SetValue(StageBoundsProperty, value);
+    }
+
+    public IEnumerable<EditorReferenceLayout>? ReferenceLayouts
+    {
+        get => (IEnumerable<EditorReferenceLayout>?)GetValue(ReferenceLayoutsProperty);
+        set => SetValue(ReferenceLayoutsProperty, value);
+    }
+
     protected override HitTestResult HitTestCore(PointHitTestParameters hitTestParameters)
     {
         var point = hitTestParameters.HitPoint;
@@ -121,6 +147,8 @@ public sealed class EditorCanvasControl : FrameworkElement
         {
             return;
         }
+
+        DrawReferenceLayouts(drawingContext);
 
         var stageBounds = GetDesktopStageBounds();
         _lastGeometry = _geometryCalculator.Compute(Document, stageBounds, VisibleSplitterThickness);
@@ -220,6 +248,67 @@ public sealed class EditorCanvasControl : FrameworkElement
                     guidePen,
                     new WpfPoint(stageBounds.X, _snapGuideAxisPosition.Value),
                     new WpfPoint(stageBounds.X + stageBounds.Width, _snapGuideAxisPosition.Value));
+            }
+        }
+    }
+
+    private void DrawReferenceLayouts(DrawingContext drawingContext)
+    {
+        var references = ReferenceLayouts?.ToList();
+        if (references is null || references.Count == 0)
+        {
+            return;
+        }
+
+        var borderPen = new WpfPen(
+            new SolidColorBrush(WpfColor.FromArgb(130, 255, 255, 255)),
+            1.1);
+        var splitterGlowPen = new WpfPen(
+            new SolidColorBrush(WpfColor.FromArgb(42, 255, 255, 255)),
+            5.2)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round
+        };
+        var splitterPen = new WpfPen(
+            new SolidColorBrush(WpfColor.FromArgb(230, 255, 255, 255)),
+            2.1)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round
+        };
+
+        foreach (var reference in references)
+        {
+            if (reference.StageBounds.Width <= 0 || reference.StageBounds.Height <= 0)
+            {
+                continue;
+            }
+
+            var geometry = _geometryCalculator.Compute(
+                reference.Document,
+                reference.StageBounds,
+                VisibleSplitterThickness);
+
+            drawingContext.DrawRectangle(null, borderPen, ToRect(reference.StageBounds));
+
+            foreach (var splitter in geometry.Splitters)
+            {
+                if (splitter.Direction == SplitDirection.Vertical)
+                {
+                    var x = splitter.Bounds.X + (splitter.Bounds.Width / 2);
+                    var start = new WpfPoint(x, splitter.HostBounds.Y);
+                    var end = new WpfPoint(x, splitter.HostBounds.Y + splitter.HostBounds.Height);
+                    drawingContext.DrawLine(splitterGlowPen, start, end);
+                    drawingContext.DrawLine(splitterPen, start, end);
+                    continue;
+                }
+
+                var y = splitter.Bounds.Y + (splitter.Bounds.Height / 2);
+                var horizontalStart = new WpfPoint(splitter.HostBounds.X, y);
+                var horizontalEnd = new WpfPoint(splitter.HostBounds.X + splitter.HostBounds.Width, y);
+                drawingContext.DrawLine(splitterGlowPen, horizontalStart, horizontalEnd);
+                drawingContext.DrawLine(splitterPen, horizontalStart, horizontalEnd);
             }
         }
     }
@@ -325,6 +414,11 @@ public sealed class EditorCanvasControl : FrameworkElement
 
     private PaneRect GetDesktopStageBounds()
     {
+        if (StageBounds.Width > 0 && StageBounds.Height > 0)
+        {
+            return StageBounds;
+        }
+
         return new PaneRect(
             StageInset,
             StageInset,

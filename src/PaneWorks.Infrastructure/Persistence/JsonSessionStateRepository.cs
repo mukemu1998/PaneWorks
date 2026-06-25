@@ -20,24 +20,36 @@ public sealed class JsonSessionStateRepository
     {
         if (!File.Exists(_filePath))
         {
-            return new SessionState(null, null);
+            return SessionState.Default;
         }
 
         try
         {
             var json = File.ReadAllText(_filePath);
-            return JsonSerializer.Deserialize<SessionState>(json, SerializerOptions) ?? new SessionState(null, null);
+            var state = JsonSerializer.Deserialize<SessionState>(json, SerializerOptions);
+            return Normalize(state);
         }
         catch
         {
-            return new SessionState(null, null);
+            return SessionState.Default;
         }
     }
 
     public void Save(SessionState state)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
-        var json = JsonSerializer.Serialize(state, SerializerOptions);
+        var json = JsonSerializer.Serialize(Normalize(state), SerializerOptions);
         File.WriteAllText(_filePath, json);
+    }
+
+    private static SessionState Normalize(SessionState? state)
+    {
+        state ??= SessionState.Default;
+
+        return state with
+        {
+            DisplayLayoutIds = state.DisplayLayoutIds ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
+            DisplaySnapLayoutIds = state.DisplaySnapLayoutIds ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        };
     }
 }

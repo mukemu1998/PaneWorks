@@ -6,6 +6,10 @@ using PaneWorks.Core.Services;
 
 namespace PaneWorks.Infrastructure.Windows;
 
+public readonly record struct WindowFrameAdjustment(double LeftInset, double TopInset, double RightInset, double BottomInset);
+
+public readonly record struct WindowBoundsUpdate(IntPtr WindowHandle, PaneRect Bounds, WindowFrameAdjustment FrameAdjustment);
+
 public sealed class WorkspaceApplyService
 {
     private const double SnapSeamOverlap = 1;
@@ -18,6 +22,9 @@ public sealed class WorkspaceApplyService
     private const int DwmaWindowCornerPreference = 33;
     private const int DwmwcpDefault = 0;
     private const int DwmwcpDoNotRound = 1;
+    private const uint WmCancelMode = 0x001F;
+    private const uint WmNcLButtonDown = 0x00A1;
+    private const nuint HtCaption = 0x0002;
 
     private readonly LayoutGeometryCalculator _geometryCalculator = new();
 
@@ -66,6 +73,174 @@ public sealed class WorkspaceApplyService
             Math.Max(0, (int)Math.Round(targetBounds.Width)),
             Math.Max(0, (int)Math.Round(targetBounds.Height)),
             SwpNoZOrder | SwpNoActivate);
+    }
+
+    public void RestoreWindowToBounds(IntPtr windowHandle, PaneRect bounds)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        RestoreRoundedCorners(windowHandle);
+        var targetBounds = AdjustWindowBoundsForFrame(windowHandle, bounds);
+
+        SetWindowPos(
+            windowHandle,
+            IntPtr.Zero,
+            (int)Math.Round(targetBounds.X),
+            (int)Math.Round(targetBounds.Y),
+            Math.Max(0, (int)Math.Round(targetBounds.Width)),
+            Math.Max(0, (int)Math.Round(targetBounds.Height)),
+            SwpNoZOrder | SwpNoActivate);
+    }
+
+    public void MoveWindowToBounds(IntPtr windowHandle, PaneRect bounds)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var targetBounds = AdjustWindowBoundsForFrame(windowHandle, bounds);
+
+        SetWindowPos(
+            windowHandle,
+            IntPtr.Zero,
+            (int)Math.Round(targetBounds.X),
+            (int)Math.Round(targetBounds.Y),
+            Math.Max(0, (int)Math.Round(targetBounds.Width)),
+            Math.Max(0, (int)Math.Round(targetBounds.Height)),
+            SwpNoZOrder | SwpNoActivate);
+    }
+
+    public void MoveWindowToBounds(IntPtr windowHandle, PaneRect bounds, WindowFrameAdjustment frameAdjustment)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var targetBounds = ApplyWindowFrameAdjustment(bounds, frameAdjustment);
+
+        SetWindowPos(
+            windowHandle,
+            IntPtr.Zero,
+            (int)Math.Round(targetBounds.X),
+            (int)Math.Round(targetBounds.Y),
+            Math.Max(0, (int)Math.Round(targetBounds.Width)),
+            Math.Max(0, (int)Math.Round(targetBounds.Height)),
+            SwpNoZOrder | SwpNoActivate);
+    }
+
+    public void MoveSnappedWindowToBounds(IntPtr windowHandle, PaneRect bounds, WindowFrameAdjustment frameAdjustment)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var targetBounds = ApplyWindowFrameAdjustment(ExpandBoundsForSeamCover(bounds), frameAdjustment);
+
+        SetWindowPos(
+            windowHandle,
+            IntPtr.Zero,
+            (int)Math.Round(targetBounds.X),
+            (int)Math.Round(targetBounds.Y),
+            Math.Max(0, (int)Math.Round(targetBounds.Width)),
+            Math.Max(0, (int)Math.Round(targetBounds.Height)),
+            SwpNoZOrder | SwpNoActivate);
+    }
+
+    public void MoveSnappedWindowsToBounds(IReadOnlyList<WindowBoundsUpdate> updates)
+    {
+        if (updates.Count == 0)
+        {
+            return;
+        }
+
+        var deferHandle = BeginDeferWindowPos(updates.Count);
+        if (deferHandle != IntPtr.Zero)
+        {
+            foreach (var update in updates)
+            {
+                if (update.WindowHandle == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                var targetBounds = ApplyWindowFrameAdjustment(
+                    ExpandBoundsForSeamCover(update.Bounds),
+                    update.FrameAdjustment);
+                deferHandle = DeferWindowPos(
+                    deferHandle,
+                    update.WindowHandle,
+                    IntPtr.Zero,
+                    (int)Math.Round(targetBounds.X),
+                    (int)Math.Round(targetBounds.Y),
+                    Math.Max(0, (int)Math.Round(targetBounds.Width)),
+                    Math.Max(0, (int)Math.Round(targetBounds.Height)),
+                    SwpNoZOrder | SwpNoActivate);
+
+                if (deferHandle == IntPtr.Zero)
+                {
+                    break;
+                }
+            }
+
+            if (deferHandle != IntPtr.Zero && EndDeferWindowPos(deferHandle))
+            {
+                return;
+            }
+        }
+
+        foreach (var update in updates)
+        {
+            MoveSnappedWindowToBounds(update.WindowHandle, update.Bounds, update.FrameAdjustment);
+        }
+    }
+
+    public WindowFrameAdjustment GetWindowFrameAdjustment(IntPtr windowHandle)
+    {
+        return TryGetWindowFrameAdjustment(windowHandle, out var frameAdjustment)
+            ? frameAdjustment
+            : default;
+    }
+
+    public void RestartWindowDragFromCaption(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _ = SendMessage(windowHandle, WmCancelMode, UIntPtr.Zero, IntPtr.Zero);
+        _ = ReleaseCapture();
+        var lParam = TryGetCursorPosition(out var cursor)
+            ? MakePointLParam(cursor.X, cursor.Y)
+            : IntPtr.Zero;
+        _ = PostMessage(windowHandle, WmNcLButtonDown, HtCaption, lParam);
+    }
+
+    public void CancelWindowDrag(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _ = SendMessage(windowHandle, WmCancelMode, UIntPtr.Zero, IntPtr.Zero);
+        _ = ReleaseCapture();
+    }
+
+    private static bool TryGetCursorPosition(out NativePoint point)
+    {
+        return GetCursorPos(out point);
+    }
+
+    private static IntPtr MakePointLParam(int x, int y)
+    {
+        return (IntPtr)((y << 16) | (x & 0xFFFF));
     }
 
     public bool TryGetVisibleWindowBounds(IntPtr windowHandle, out PaneRect bounds)
@@ -118,26 +293,38 @@ public sealed class WorkspaceApplyService
 
     private static PaneRect AdjustWindowBoundsForFrame(IntPtr windowHandle, PaneRect targetBounds)
     {
-        if (!GetWindowRect(windowHandle, out var windowRect))
+        if (!TryGetWindowFrameAdjustment(windowHandle, out var frameAdjustment))
         {
             return targetBounds;
         }
 
-        if (!TryGetExtendedFrameBounds(windowHandle, out var frameRect))
+        return ApplyWindowFrameAdjustment(targetBounds, frameAdjustment);
+    }
+
+    private static bool TryGetWindowFrameAdjustment(IntPtr windowHandle, out WindowFrameAdjustment frameAdjustment)
+    {
+        frameAdjustment = default;
+        if (!GetWindowRect(windowHandle, out var windowRect)
+            || !TryGetExtendedFrameBounds(windowHandle, out var frameRect))
         {
-            return targetBounds;
+            return false;
         }
 
-        var leftInset = Math.Max(0, frameRect.Left - windowRect.Left);
-        var topInset = Math.Max(0, frameRect.Top - windowRect.Top);
-        var rightInset = Math.Max(0, windowRect.Right - frameRect.Right);
-        var bottomInset = Math.Max(0, windowRect.Bottom - frameRect.Bottom);
+        frameAdjustment = new WindowFrameAdjustment(
+            Math.Max(0, frameRect.Left - windowRect.Left),
+            Math.Max(0, frameRect.Top - windowRect.Top),
+            Math.Max(0, windowRect.Right - frameRect.Right),
+            Math.Max(0, windowRect.Bottom - frameRect.Bottom));
+        return true;
+    }
 
+    private static PaneRect ApplyWindowFrameAdjustment(PaneRect targetBounds, WindowFrameAdjustment frameAdjustment)
+    {
         return new PaneRect(
-            targetBounds.X - leftInset,
-            targetBounds.Y - topInset,
-            targetBounds.Width + leftInset + rightInset,
-            targetBounds.Height + topInset + bottomInset);
+            targetBounds.X - frameAdjustment.LeftInset,
+            targetBounds.Y - frameAdjustment.TopInset,
+            targetBounds.Width + frameAdjustment.LeftInset + frameAdjustment.RightInset,
+            targetBounds.Height + frameAdjustment.TopInset + frameAdjustment.BottomInset);
     }
 
     private static PaneRect ExpandBoundsForSeamCover(PaneRect bounds)
@@ -262,6 +449,13 @@ public sealed class WorkspaceApplyService
         public int Bottom;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     private enum GetWindowCommand : uint
@@ -317,4 +511,33 @@ public sealed class WorkspaceApplyService
         int cx,
         int cy,
         uint uFlags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr BeginDeferWindowPos(int nNumWindows);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DeferWindowPos(
+        IntPtr hWinPosInfo,
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint uFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool EndDeferWindowPos(IntPtr hWinPosInfo);
+
+    [DllImport("user32.dll")]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out NativePoint lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, nuint wParam, IntPtr lParam);
 }

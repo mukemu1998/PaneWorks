@@ -14,9 +14,8 @@
         ShowActivated="False">
     <Grid Background="Transparent"
           IsHitTestVisible="False">
-        <controls:EditorCanvasControl Document="{Binding OverlaySnapDocument}"
+        <controls:EditorCanvasControl x:Name="OverlayCanvas"
                                       SelectedNodeId="{x:Null}"
-                                      PreviewNodeId="{Binding PreviewNodeId}"
                                       IsHitTestVisible="False" />
     </Grid>
 </Window>

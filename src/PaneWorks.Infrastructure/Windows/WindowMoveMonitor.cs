@@ -21,6 +21,8 @@ public sealed class WindowMoveMonitor : IDisposable
     public event EventHandler<WindowMoveStateChangedEventArgs>? MoveStarted;
     public event EventHandler<WindowMoveStateChangedEventArgs>? MoveEnded;
 
+    public bool IsRunning => _moveStartHook != IntPtr.Zero && _moveEndHook != IntPtr.Zero;
+
     public void Start()
     {
         if (_moveStartHook != IntPtr.Zero || _moveEndHook != IntPtr.Zero)
@@ -45,6 +47,11 @@ public sealed class WindowMoveMonitor : IDisposable
             0,
             0,
             WineventOutOfContext | WineventSkipOwnProcess);
+
+        if (!IsRunning)
+        {
+            Stop();
+        }
     }
 
     public void Stop()

@@ -1,21 +1,20 @@
+using PaneWorks.App.Diagnostics;
 using PaneWorks.App.ViewModels;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
 using Wpf = System.Windows;
+using WpfControls = System.Windows.Controls;
+using WpfMedia = System.Windows.Media;
+using WpfPrimitives = System.Windows.Controls.Primitives;
 
 namespace PaneWorks.App;
 
 public partial class App : Wpf.Application
 {
-    // Tray colors are centralized here so the editor and tray stay visually consistent.
-    private static readonly Drawing.Color TrayBackColor = Drawing.Color.FromArgb(21, 27, 42);
-    private static readonly Drawing.Color TrayBackHoverColor = Drawing.Color.FromArgb(47, 128, 237);
-    private static readonly Drawing.Color TrayBackCheckedColor = Drawing.Color.FromArgb(47, 163, 107);
-    private static readonly Drawing.Color TrayBorderColor = Drawing.Color.FromArgb(63, 255, 255, 255);
-    private static readonly Drawing.Color TrayTextColor = Drawing.Color.FromArgb(248, 251, 255);
-    private static readonly Drawing.Color TrayMutedTextColor = Drawing.Color.FromArgb(205, 239, 244, 255);
-
     private Forms.NotifyIcon? _notifyIcon;
+    private WpfControls.ContextMenu? _trayContextMenu;
+    private IReadOnlyList<LayoutListItemViewModel> _cachedTrayLayouts = Array.Empty<LayoutListItemViewModel>();
+    private string _cachedActiveSnapLayoutId = string.Empty;
     private MainWindow? _mainWindow;
     private bool _isExitRequested;
 
@@ -24,6 +23,7 @@ public partial class App : Wpf.Application
         base.OnStartup(e);
 
         ShutdownMode = Wpf.ShutdownMode.OnExplicitShutdown;
+        PaneWorksLog.Info("App startup");
         _mainWindow = new MainWindow();
         MainWindow = _mainWindow;
         InitializeNotifyIcon();
@@ -37,6 +37,12 @@ public partial class App : Wpf.Application
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
             _notifyIcon = null;
+        }
+
+        if (_trayContextMenu is not null)
+        {
+            _trayContextMenu.IsOpen = false;
+            _trayContextMenu = null;
         }
 
         base.OnExit(e);
@@ -56,9 +62,13 @@ public partial class App : Wpf.Application
             return;
         }
 
-        _mainWindow.ShowInTaskbar = false;
-        _mainWindow.WindowState = Wpf.WindowState.Minimized;
-        _mainWindow.Hide();
+        InvokeOnMainWindow(() =>
+        {
+            PaneWorksLog.Info("Minimize main window to tray");
+            _mainWindow.ShowInTaskbar = false;
+            _mainWindow.WindowState = Wpf.WindowState.Minimized;
+            _mainWindow.Hide();
+        });
     }
 
     public void RestoreMainWindowFromTray()
@@ -68,122 +78,143 @@ public partial class App : Wpf.Application
             return;
         }
 
-        _mainWindow.ShowInTaskbar = true;
-        _mainWindow.Show();
-        _mainWindow.WindowState = Wpf.WindowState.Maximized;
-        _mainWindow.Activate();
+        BeginInvokeOnMainWindow(() =>
+        {
+            PaneWorksLog.Info("Restore main window from tray");
+            _mainWindow.PrepareForTrayRestore();
+            _mainWindow.ShowInTaskbar = true;
+            _mainWindow.Show();
+            _mainWindow.WindowState = Wpf.WindowState.Maximized;
+            _mainWindow.Activate();
+        });
     }
 
     private void InitializeNotifyIcon()
     {
-        var menu = CreateTrayMenu();
-
         _notifyIcon = new Forms.NotifyIcon
         {
             Text = "PaneWorks",
             Icon = Drawing.SystemIcons.Application,
-            Visible = true,
-            ContextMenuStrip = menu
+            Visible = true
         };
 
-        _notifyIcon.DoubleClick += (_, _) => RestoreMainWindowFromTray();
-    }
-
-    private Forms.ContextMenuStrip CreateTrayMenu()
-    {
-        var menu = new Forms.ContextMenuStrip
+        _notifyIcon.DoubleClick += (_, _) =>
         {
-            ShowImageMargin = false,
-            ShowCheckMargin = true,
-            Font = new Drawing.Font("Microsoft YaHei UI", 10F),
-            Renderer = new TrayMenuRenderer()
+            PaneWorksLog.Info("Tray double click");
+            RestoreMainWindowFromTray();
         };
-
-        menu.BackColor = TrayBackColor;
-        menu.ForeColor = TrayTextColor;
-        menu.Padding = new Forms.Padding(8);
-        menu.Opening += TrayMenu_Opening;
-        return menu;
+        _notifyIcon.MouseUp += NotifyIcon_MouseUp;
+        RefreshTraySnapshot();
     }
 
-    private void TrayMenu_Opening(object? sender, System.ComponentModel.CancelEventArgs e)
+    private void NotifyIcon_MouseUp(object? sender, Forms.MouseEventArgs e)
     {
-        if (sender is not Forms.ContextMenuStrip menu)
+        if (e.Button != Forms.MouseButtons.Right)
         {
             return;
         }
 
-        RebuildTrayMenu(menu);
+        PaneWorksLog.Info("Tray right click");
+        BeginInvokeOnMainWindow(ShowTrayContextMenu);
     }
 
-    private void RebuildTrayMenu(Forms.ContextMenuStrip menu)
+    private void ShowTrayContextMenu()
     {
-        menu.SuspendLayout();
-        menu.Items.Clear();
+        PaneWorksLog.Info("WPF tray menu opening");
+        RefreshTraySnapshot();
 
-        menu.Items.Add(CreateMenuItem("打开 PaneWorks", (_, _) => RestoreMainWindowFromTray(), bold: true));
-        menu.Items.Add(CreateLayoutsMenuItem());
-        menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(CreateMenuItem("退出", (_, _) => ExitFromTray()));
+        if (_trayContextMenu is not null)
+        {
+            _trayContextMenu.IsOpen = false;
+        }
 
-        menu.ResumeLayout();
+        var mousePosition = Forms.Control.MousePosition;
+        var menuPoint = ToDipScreenPoint(mousePosition.X, mousePosition.Y);
+        _trayContextMenu = CreateWpfTrayMenu(menuPoint.X, menuPoint.Y);
+        _trayContextMenu.IsOpen = true;
+        PaneWorksLog.Info("WPF tray menu opened");
     }
 
-    private Forms.ToolStripMenuItem CreateLayoutsMenuItem()
+    private WpfControls.ContextMenu CreateWpfTrayMenu(double x, double y)
     {
-        var item = CreateMenuItem("快速切换吸附布局");
-        item.ForeColor = TrayTextColor;
-        item.DropDown.BackColor = TrayBackColor;
+        var menu = new WpfControls.ContextMenu
+        {
+            Placement = WpfPrimitives.PlacementMode.AbsolutePoint,
+            HorizontalOffset = x,
+            VerticalOffset = y,
+            MinWidth = 230,
+            Background = new WpfMedia.SolidColorBrush(WpfMedia.Color.FromRgb(21, 27, 42)),
+            Foreground = new WpfMedia.SolidColorBrush(WpfMedia.Color.FromRgb(248, 251, 255)),
+            BorderBrush = new WpfMedia.SolidColorBrush(WpfMedia.Color.FromRgb(78, 87, 103)),
+            BorderThickness = new Wpf.Thickness(1)
+        };
 
+        menu.Items.Add(CreateWpfMenuItem("打开 PaneWorks", RestoreMainWindowFromTray, bold: true));
+        menu.Items.Add(CreateWpfLayoutsMenuItem());
+        menu.Items.Add(new WpfControls.Separator());
+        menu.Items.Add(CreateWpfMenuItem("退出", ExitFromTray));
+        return menu;
+    }
+
+    private Wpf.Point ToDipScreenPoint(int x, int y)
+    {
+        var transform = _mainWindow is null
+            ? WpfMedia.Matrix.Identity
+            : Wpf.PresentationSource.FromVisual(_mainWindow)?.CompositionTarget?.TransformFromDevice
+                ?? WpfMedia.Matrix.Identity;
+
+        return transform.Transform(new Wpf.Point(x, y));
+    }
+
+    private WpfControls.MenuItem CreateWpfLayoutsMenuItem()
+    {
+        var item = CreateWpfMenuItem("快速切换吸附布局", null);
         if (_mainWindow is null)
         {
-            item.Enabled = false;
+            item.IsEnabled = false;
             return item;
         }
 
-        var layouts = _mainWindow.GetTrayLayoutItems();
-        var activeLayoutId = _mainWindow.GetActiveSnapLayoutId();
+        var layouts = _cachedTrayLayouts;
+        var activeLayoutId = _cachedActiveSnapLayoutId;
 
         if (layouts.Count == 0)
         {
-            var emptyItem = CreateMenuItem("暂无已保存布局");
-            emptyItem.Enabled = false;
-            emptyItem.ForeColor = TrayMutedTextColor;
-            item.DropDownItems.Add(emptyItem);
+            var emptyItem = CreateWpfMenuItem("暂无已保存布局", null);
+            emptyItem.IsEnabled = false;
+            item.Items.Add(emptyItem);
             return item;
         }
 
         foreach (var layout in layouts)
         {
-            var layoutItem = CreateMenuItem(layout.Name, (_, _) => _mainWindow.SwitchSnapLayoutFromTray(layout.Id));
-            layoutItem.Checked = string.Equals(layout.Id, activeLayoutId, StringComparison.OrdinalIgnoreCase);
-            layoutItem.ToolTipText = layout.Description;
-            item.DropDownItems.Add(layoutItem);
+            var layoutId = layout.Id;
+            var layoutItem = CreateWpfMenuItem(layout.Name, () => SwitchSnapLayoutFromTray(layoutId));
+            layoutItem.IsCheckable = true;
+            layoutItem.IsChecked = string.Equals(layout.Id, activeLayoutId, StringComparison.OrdinalIgnoreCase);
+            layoutItem.ToolTip = layout.Description;
+            item.Items.Add(layoutItem);
         }
 
         return item;
     }
 
-    private static Forms.ToolStripMenuItem CreateMenuItem(
-        string text,
-        EventHandler? onClick = null,
-        bool bold = false)
+    private static WpfControls.MenuItem CreateWpfMenuItem(string text, Action? onClick, bool bold = false)
     {
-        var item = new Forms.ToolStripMenuItem(text)
+        var item = new WpfControls.MenuItem
         {
-            AutoSize = false,
-            Height = 34,
-            Width = 230,
-            Padding = new Forms.Padding(12, 6, 12, 6),
-            Margin = new Forms.Padding(0, 2, 0, 2),
-            ForeColor = TrayTextColor,
-            BackColor = TrayBackColor,
-            Font = new Drawing.Font("Microsoft YaHei UI", bold ? 10F : 9.5F, bold ? Drawing.FontStyle.Bold : Drawing.FontStyle.Regular)
+            Header = text,
+            Padding = new Wpf.Thickness(14, 8, 14, 8),
+            FontFamily = new WpfMedia.FontFamily("Microsoft YaHei UI"),
+            FontSize = bold ? 14 : 13,
+            FontWeight = bold ? Wpf.FontWeights.Bold : Wpf.FontWeights.Normal,
+            Foreground = new WpfMedia.SolidColorBrush(WpfMedia.Color.FromRgb(248, 251, 255)),
+            Background = new WpfMedia.SolidColorBrush(WpfMedia.Color.FromRgb(21, 27, 42))
         };
 
         if (onClick is not null)
         {
-            item.Click += onClick;
+            item.Click += (_, _) => onClick();
         }
 
         return item;
@@ -197,82 +228,80 @@ public partial class App : Wpf.Application
             return;
         }
 
-        _isExitRequested = true;
-        _mainWindow.ShowInTaskbar = true;
-        _mainWindow.Show();
-        _mainWindow.WindowState = Wpf.WindowState.Maximized;
-        _mainWindow.Close();
-
-        if (_isExitRequested)
+        BeginInvokeOnMainWindow(() =>
         {
-            Shutdown();
-        }
+            PaneWorksLog.Info("Exit from tray");
+            _isExitRequested = true;
+            _mainWindow.PrepareForTrayRestore();
+            _mainWindow.ShowInTaskbar = true;
+            _mainWindow.Show();
+            _mainWindow.WindowState = Wpf.WindowState.Maximized;
+            _mainWindow.Close();
+
+            if (_isExitRequested)
+            {
+                Shutdown();
+            }
+        });
     }
 
-    private sealed class TrayMenuRenderer : Forms.ToolStripProfessionalRenderer
+    private void RefreshTraySnapshot()
     {
-        public TrayMenuRenderer()
-            : base(new TrayMenuColorTable())
+        if (_mainWindow is null)
         {
-            RoundedEdges = false;
+            return;
         }
 
-        protected override void OnRenderToolStripBorder(Forms.ToolStripRenderEventArgs e)
+        if (!_mainWindow.Dispatcher.CheckAccess())
         {
-            using var pen = new Drawing.Pen(TrayBorderColor);
-            var bounds = new Drawing.Rectangle(0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
-            e.Graphics.DrawRectangle(pen, bounds);
+            BeginInvokeOnMainWindow(RefreshTraySnapshot);
+            return;
         }
 
-        protected override void OnRenderSeparator(Forms.ToolStripSeparatorRenderEventArgs e)
-        {
-            using var pen = new Drawing.Pen(TrayBorderColor);
-            var y = e.Item.ContentRectangle.Top + (e.Item.ContentRectangle.Height / 2);
-            e.Graphics.DrawLine(pen, 10, y, e.Item.Width - 10, y);
-        }
-
-        protected override void OnRenderItemText(Forms.ToolStripItemTextRenderEventArgs e)
-        {
-            e.TextColor = e.Item.Enabled
-                ? TrayTextColor
-                : TrayMutedTextColor;
-
-            e.TextFont = e.Item.Font;
-            base.OnRenderItemText(e);
-        }
-
-        protected override void OnRenderArrow(Forms.ToolStripArrowRenderEventArgs e)
-        {
-            e.ArrowColor = TrayTextColor;
-            base.OnRenderArrow(e);
-        }
-
-        protected override void OnRenderItemCheck(Forms.ToolStripItemImageRenderEventArgs e)
-        {
-            using var brush = new Drawing.SolidBrush(TrayTextColor);
-            e.Graphics.FillEllipse(brush, new Drawing.Rectangle(10, 10, 8, 8));
-        }
+        _cachedTrayLayouts = _mainWindow.GetTrayLayoutItems();
+        _cachedActiveSnapLayoutId = _mainWindow.GetActiveSnapLayoutId();
     }
 
-    private sealed class TrayMenuColorTable : Forms.ProfessionalColorTable
+    private void SwitchSnapLayoutFromTray(string layoutId)
     {
-        public override Drawing.Color ToolStripDropDownBackground => TrayBackColor;
-        public override Drawing.Color ImageMarginGradientBegin => TrayBackColor;
-        public override Drawing.Color ImageMarginGradientMiddle => TrayBackColor;
-        public override Drawing.Color ImageMarginGradientEnd => TrayBackColor;
-        public override Drawing.Color MenuBorder => TrayBorderColor;
-        public override Drawing.Color MenuItemBorder => Drawing.Color.Transparent;
-        public override Drawing.Color MenuItemSelected => TrayBackHoverColor;
-        public override Drawing.Color MenuItemSelectedGradientBegin => TrayBackHoverColor;
-        public override Drawing.Color MenuItemSelectedGradientEnd => TrayBackHoverColor;
-        public override Drawing.Color MenuItemPressedGradientBegin => TrayBackColor;
-        public override Drawing.Color MenuItemPressedGradientMiddle => TrayBackColor;
-        public override Drawing.Color MenuItemPressedGradientEnd => TrayBackColor;
-        public override Drawing.Color ButtonSelectedBorder => Drawing.Color.Transparent;
-        public override Drawing.Color CheckBackground => TrayBackCheckedColor;
-        public override Drawing.Color CheckPressedBackground => TrayBackCheckedColor;
-        public override Drawing.Color CheckSelectedBackground => TrayBackCheckedColor;
-        public override Drawing.Color SeparatorDark => TrayBorderColor;
-        public override Drawing.Color SeparatorLight => TrayBorderColor;
+        BeginInvokeOnMainWindow(() =>
+        {
+            PaneWorksLog.Info($"Switch snap layout from tray: {layoutId}");
+            _mainWindow?.SwitchSnapLayoutFromTray(layoutId);
+            RefreshTraySnapshot();
+        });
     }
+
+    private void InvokeOnMainWindow(Action action)
+    {
+        if (_mainWindow is null)
+        {
+            return;
+        }
+
+        if (_mainWindow.Dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        _mainWindow.Dispatcher.Invoke(action);
+    }
+
+    private void BeginInvokeOnMainWindow(Action action)
+    {
+        if (_mainWindow is null)
+        {
+            return;
+        }
+
+        if (_mainWindow.Dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        _mainWindow.Dispatcher.BeginInvoke(action);
+    }
+
 }
