@@ -8,6 +8,8 @@ namespace PaneWorks.Infrastructure.Windows;
 
 public readonly record struct WindowFrameAdjustment(double LeftInset, double TopInset, double RightInset, double BottomInset);
 
+public readonly record struct WindowMinimumSize(double Width, double Height);
+
 public readonly record struct WindowBoundsUpdate(IntPtr WindowHandle, PaneRect Bounds, WindowFrameAdjustment FrameAdjustment);
 
 public sealed class WorkspaceApplyService
@@ -22,8 +24,12 @@ public sealed class WorkspaceApplyService
     private const int DwmaWindowCornerPreference = 33;
     private const int DwmwcpDefault = 0;
     private const int DwmwcpDoNotRound = 1;
+    private const int SmCxMinTrack = 34;
+    private const int SmCyMinTrack = 35;
     private const uint WmCancelMode = 0x001F;
+    private const uint WmGetMinMaxInfo = 0x0024;
     private const uint WmNcLButtonDown = 0x00A1;
+    private const uint SmtoAbortIfHung = 0x0002;
     private const nuint HtCaption = 0x0002;
 
     private readonly LayoutGeometryCalculator _geometryCalculator = new();
@@ -207,6 +213,15 @@ public sealed class WorkspaceApplyService
             : default;
     }
 
+    public WindowMinimumSize GetWindowMinimumVisibleSize(IntPtr windowHandle)
+    {
+        var minTrackSize = GetWindowMinimumTrackSize(windowHandle);
+        var frameAdjustment = GetWindowFrameAdjustment(windowHandle);
+        return new WindowMinimumSize(
+            Math.Max(1, minTrackSize.Width - frameAdjustment.LeftInset - frameAdjustment.RightInset),
+            Math.Max(1, minTrackSize.Height - frameAdjustment.TopInset - frameAdjustment.BottomInset));
+    }
+
     public void RestartWindowDragFromCaption(IntPtr windowHandle)
     {
         if (windowHandle == IntPtr.Zero)
@@ -336,6 +351,55 @@ public sealed class WorkspaceApplyService
             Math.Max(0, bounds.Height + (SnapSeamOverlap * 2)));
     }
 
+    private static WindowMinimumSize GetWindowMinimumTrackSize(IntPtr windowHandle)
+    {
+        var fallback = new WindowMinimumSize(
+            Math.Max(1, GetSystemMetrics(SmCxMinTrack)),
+            Math.Max(1, GetSystemMetrics(SmCyMinTrack)));
+
+        if (windowHandle == IntPtr.Zero)
+        {
+            return fallback;
+        }
+
+        var minMaxInfo = new NativeMinMaxInfo
+        {
+            MinTrackSize = new NativePoint
+            {
+                X = (int)Math.Round(fallback.Width),
+                Y = (int)Math.Round(fallback.Height)
+            }
+        };
+
+        var buffer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMinMaxInfo>());
+        try
+        {
+            Marshal.StructureToPtr(minMaxInfo, buffer, false);
+            var result = SendMessageTimeout(
+                windowHandle,
+                WmGetMinMaxInfo,
+                UIntPtr.Zero,
+                buffer,
+                SmtoAbortIfHung,
+                50,
+                out _);
+
+            if (result == IntPtr.Zero)
+            {
+                return fallback;
+            }
+
+            minMaxInfo = Marshal.PtrToStructure<NativeMinMaxInfo>(buffer);
+            return new WindowMinimumSize(
+                Math.Max(fallback.Width, minMaxInfo.MinTrackSize.X),
+                Math.Max(fallback.Height, minMaxInfo.MinTrackSize.Y));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
     private static List<WindowCandidate> EnumerateCandidateWindows(IntPtr excludedWindowHandle)
     {
         var currentProcessId = Environment.ProcessId;
@@ -456,6 +520,16 @@ public sealed class WorkspaceApplyService
         public int Y;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeMinMaxInfo
+    {
+        public NativePoint Reserved;
+        public NativePoint MaxSize;
+        public NativePoint MaxPosition;
+        public NativePoint MinTrackSize;
+        public NativePoint MaxTrackSize;
+    }
+
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     private enum GetWindowCommand : uint
@@ -537,6 +611,19 @@ public sealed class WorkspaceApplyService
 
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd,
+        uint msg,
+        UIntPtr wParam,
+        IntPtr lParam,
+        uint flags,
+        uint timeout,
+        out UIntPtr result);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
 
     [DllImport("user32.dll")]
     private static extern bool PostMessage(IntPtr hWnd, uint msg, nuint wParam, IntPtr lParam);

@@ -1042,15 +1042,30 @@ public partial class MainWindow : Window
                 var moved = false;
                 if (_workspaceApplyService.TryGetVisibleWindowBounds(session.SourceWindowHandle, out var sourceBounds))
                 {
-                    var edgePosition = GetEdgePosition(sourceBounds, session.Edge);
-                    if (double.IsNaN(lastEdgePosition) || Math.Abs(edgePosition - lastEdgePosition) >= 1)
+                    var rawEdgePosition = GetEdgePosition(sourceBounds, session.Edge);
+                    var edgePosition = ClampRuntimeLinkedEdgePosition(session, rawEdgePosition);
+                    var isEdgeClamped = Math.Abs(edgePosition - rawEdgePosition) >= 0.5;
+
+                    if (double.IsNaN(lastEdgePosition) || Math.Abs(edgePosition - lastEdgePosition) >= 1 || isEdgeClamped)
                     {
-                        var updates = BuildRuntimeLinkedResizeUpdates(session, edgePosition);
+                        var updates = BuildRuntimeLinkedResizeUpdates(session, edgePosition, includeSourceWindow: isEdgeClamped);
                         if (updates.Count > 0)
                         {
-                            _suppressMoveEventsUntil = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(120);
+                            var stopAtLockedEdge = isEdgeClamped;
+                            _suppressMoveEventsUntil = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(stopAtLockedEdge ? 350 : 120);
+                            if (stopAtLockedEdge)
+                            {
+                                _workspaceApplyService.CancelWindowDrag(session.SourceWindowHandle);
+                            }
+
                             _workspaceApplyService.MoveSnappedWindowsToBounds(updates);
                             moved = true;
+
+                            if (stopAtLockedEdge)
+                            {
+                                PaneWorksLog.Info($"Runtime linked resize stopped at locked edge: 0x{session.SourceWindowHandle.ToInt64():X}, edge={edgePosition:0}");
+                                break;
+                            }
                         }
 
                         lastEdgePosition = edgePosition;
@@ -1116,14 +1131,17 @@ public partial class MainWindow : Window
                     return null;
                 }
 
-                return new RuntimeLinkedResizeNeighbor(
-                    item.Key,
-                    bounds,
-                    _workspaceApplyService.GetWindowFrameAdjustment(item.Key));
+                return TryGetRuntimeResizeNeighborSide(sourceBounds, bounds, edge.Value, out var side)
+                    ? new RuntimeLinkedResizeNeighbor(
+                        item.Key,
+                        bounds,
+                        side,
+                        _workspaceApplyService.GetWindowMinimumVisibleSize(item.Key),
+                        _workspaceApplyService.GetWindowFrameAdjustment(item.Key))
+                    : null;
             })
             .Where(item => item is not null)
             .Cast<RuntimeLinkedResizeNeighbor>()
-            .Where(item => IsRuntimeResizeNeighbor(sourceBounds, item.InitialBounds, edge.Value))
             .ToList();
 
         if (neighbors.Count == 0)
@@ -1131,23 +1149,62 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var minEdgePosition = double.NegativeInfinity;
+        var maxEdgePosition = double.PositiveInfinity;
+        var sourceMinimumSize = _workspaceApplyService.GetWindowMinimumVisibleSize(windowHandle);
+        AddRuntimeLinkedEdgeConstraints(sourceBounds, sourceMinimumSize, edge.Value, ref minEdgePosition, ref maxEdgePosition);
+        foreach (var neighbor in neighbors)
+        {
+            AddRuntimeLinkedEdgeConstraints(
+                neighbor.InitialBounds,
+                neighbor.MinimumSize,
+                GetRuntimeLinkedResizeEdge(edge.Value, neighbor.Side),
+                ref minEdgePosition,
+                ref maxEdgePosition);
+        }
+
+        var initialEdgePosition = GetEdgePosition(sourceBounds, edge.Value);
+        if (minEdgePosition > maxEdgePosition)
+        {
+            minEdgePosition = initialEdgePosition;
+            maxEdgePosition = initialEdgePosition;
+        }
+
         session = new RuntimeLinkedResizeSession(
             windowHandle,
             binding.DisplayId,
             sourceBounds,
+            sourceMinimumSize,
+            _workspaceApplyService.GetWindowFrameAdjustment(windowHandle),
             edge.Value,
+            minEdgePosition,
+            maxEdgePosition,
             neighbors);
         return true;
     }
 
     private List<WindowBoundsUpdate> BuildRuntimeLinkedResizeUpdates(
         RuntimeLinkedResizeSession session,
-        double edgePosition)
+        double edgePosition,
+        bool includeSourceWindow)
     {
-        var updates = new List<WindowBoundsUpdate>(session.Neighbors.Count);
+        var updates = new List<WindowBoundsUpdate>(session.Neighbors.Count + (includeSourceWindow ? 1 : 0));
+        if (includeSourceWindow)
+        {
+            updates.Add(new WindowBoundsUpdate(
+                session.SourceWindowHandle,
+                GetBoundsForRuntimeLinkedResizeEdge(session.SourceInitialBounds, session.SourceMinimumSize, session.Edge, edgePosition),
+                session.SourceFrameAdjustment));
+        }
+
         foreach (var neighbor in session.Neighbors)
         {
-            var bounds = GetRuntimeLinkedNeighborBounds(neighbor.InitialBounds, session.Edge, edgePosition);
+            var bounds = GetRuntimeLinkedNeighborBounds(
+                neighbor.InitialBounds,
+                neighbor.MinimumSize,
+                session.Edge,
+                neighbor.Side,
+                edgePosition);
             if (AreBoundsClose(bounds, neighbor.InitialBounds, 0.5))
             {
                 continue;
@@ -1190,52 +1247,189 @@ public partial class MainWindow : Window
         }
     }
 
-    private static bool IsRuntimeResizeNeighbor(PaneRect sourceBounds, PaneRect candidateBounds, ResizeEdge edge)
+    private static bool TryGetRuntimeResizeNeighborSide(
+        PaneRect sourceBounds,
+        PaneRect candidateBounds,
+        ResizeEdge edge,
+        out RuntimeLinkedResizeSide side)
+    {
+        side = default;
+        var edgePosition = GetEdgePosition(sourceBounds, edge);
+
+        if (IsSameSideRuntimeResizeEdge(candidateBounds, edge, edgePosition))
+        {
+            side = RuntimeLinkedResizeSide.SameSide;
+            return true;
+        }
+
+        if (IsOppositeSideRuntimeResizeEdge(candidateBounds, edge, edgePosition))
+        {
+            side = RuntimeLinkedResizeSide.OppositeSide;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsSameSideRuntimeResizeEdge(PaneRect bounds, ResizeEdge edge, double edgePosition)
     {
         return edge switch
         {
-            ResizeEdge.Left => AreEdgesClose(GetRight(candidateBounds), sourceBounds.X)
-                && HasVerticalOverlap(sourceBounds, candidateBounds),
-            ResizeEdge.Right => AreEdgesClose(candidateBounds.X, GetRight(sourceBounds))
-                && HasVerticalOverlap(sourceBounds, candidateBounds),
-            ResizeEdge.Top => AreEdgesClose(GetBottom(candidateBounds), sourceBounds.Y)
-                && HasHorizontalOverlap(sourceBounds, candidateBounds),
-            _ => AreEdgesClose(candidateBounds.Y, GetBottom(sourceBounds))
-                && HasHorizontalOverlap(sourceBounds, candidateBounds)
+            ResizeEdge.Left => AreEdgesClose(bounds.X, edgePosition),
+            ResizeEdge.Right => AreEdgesClose(GetRight(bounds), edgePosition),
+            ResizeEdge.Top => AreEdgesClose(bounds.Y, edgePosition),
+            _ => AreEdgesClose(GetBottom(bounds), edgePosition)
         };
     }
 
-    private static PaneRect GetRuntimeLinkedNeighborBounds(PaneRect initialBounds, ResizeEdge edge, double edgePosition)
+    private static bool IsOppositeSideRuntimeResizeEdge(PaneRect bounds, ResizeEdge edge, double edgePosition)
+    {
+        return edge switch
+        {
+            ResizeEdge.Left => AreEdgesClose(GetRight(bounds), edgePosition),
+            ResizeEdge.Right => AreEdgesClose(bounds.X, edgePosition),
+            ResizeEdge.Top => AreEdgesClose(GetBottom(bounds), edgePosition),
+            _ => AreEdgesClose(bounds.Y, edgePosition)
+        };
+    }
+
+    private static PaneRect GetRuntimeLinkedNeighborBounds(
+        PaneRect initialBounds,
+        WindowMinimumSize minimumSize,
+        ResizeEdge edge,
+        RuntimeLinkedResizeSide side,
+        double edgePosition)
+    {
+        return GetBoundsForRuntimeLinkedResizeEdge(
+            initialBounds,
+            minimumSize,
+            GetRuntimeLinkedResizeEdge(edge, side),
+            edgePosition);
+    }
+
+    private static ResizeEdge GetRuntimeLinkedResizeEdge(ResizeEdge edge, RuntimeLinkedResizeSide side)
+    {
+        if (side == RuntimeLinkedResizeSide.SameSide)
+        {
+            return edge;
+        }
+
+        return edge switch
+        {
+            ResizeEdge.Left => ResizeEdge.Right,
+            ResizeEdge.Right => ResizeEdge.Left,
+            ResizeEdge.Top => ResizeEdge.Bottom,
+            _ => ResizeEdge.Top
+        };
+    }
+
+    private static PaneRect GetBoundsForRuntimeLinkedResizeEdge(
+        PaneRect initialBounds,
+        WindowMinimumSize minimumSize,
+        ResizeEdge edge,
+        double edgePosition)
     {
         var right = GetRight(initialBounds);
         var bottom = GetBottom(initialBounds);
         return edge switch
         {
-            ResizeEdge.Left => new PaneRect(
-                initialBounds.X,
-                initialBounds.Y,
-                Math.Max(RuntimeLinkedResizeMinWidth, edgePosition - initialBounds.X),
-                initialBounds.Height),
-            ResizeEdge.Right => GetRightNeighborBounds(initialBounds, right, edgePosition),
-            ResizeEdge.Top => new PaneRect(
-                initialBounds.X,
-                initialBounds.Y,
-                initialBounds.Width,
-                Math.Max(RuntimeLinkedResizeMinHeight, edgePosition - initialBounds.Y)),
-            _ => GetBottomNeighborBounds(initialBounds, bottom, edgePosition)
+            ResizeEdge.Left => GetLeftEdgeBounds(initialBounds, minimumSize, right, edgePosition),
+            ResizeEdge.Right => GetRightEdgeBounds(initialBounds, minimumSize, edgePosition),
+            ResizeEdge.Top => GetTopEdgeBounds(initialBounds, minimumSize, bottom, edgePosition),
+            _ => GetBottomEdgeBounds(initialBounds, minimumSize, edgePosition)
         };
     }
 
-    private static PaneRect GetRightNeighborBounds(PaneRect initialBounds, double right, double edgePosition)
+    private static PaneRect GetLeftEdgeBounds(
+        PaneRect initialBounds,
+        WindowMinimumSize minimumSize,
+        double right,
+        double edgePosition)
     {
-        var width = Math.Max(RuntimeLinkedResizeMinWidth, right - edgePosition);
+        var width = Math.Max(GetRuntimeLinkedMinWidth(initialBounds, minimumSize), right - edgePosition);
         return new PaneRect(right - width, initialBounds.Y, width, initialBounds.Height);
     }
 
-    private static PaneRect GetBottomNeighborBounds(PaneRect initialBounds, double bottom, double edgePosition)
+    private static PaneRect GetRightEdgeBounds(
+        PaneRect initialBounds,
+        WindowMinimumSize minimumSize,
+        double edgePosition)
     {
-        var height = Math.Max(RuntimeLinkedResizeMinHeight, bottom - edgePosition);
+        return new PaneRect(
+            initialBounds.X,
+            initialBounds.Y,
+            Math.Max(GetRuntimeLinkedMinWidth(initialBounds, minimumSize), edgePosition - initialBounds.X),
+            initialBounds.Height);
+    }
+
+    private static PaneRect GetTopEdgeBounds(
+        PaneRect initialBounds,
+        WindowMinimumSize minimumSize,
+        double bottom,
+        double edgePosition)
+    {
+        var height = Math.Max(GetRuntimeLinkedMinHeight(initialBounds, minimumSize), bottom - edgePosition);
         return new PaneRect(initialBounds.X, bottom - height, initialBounds.Width, height);
+    }
+
+    private static PaneRect GetBottomEdgeBounds(
+        PaneRect initialBounds,
+        WindowMinimumSize minimumSize,
+        double edgePosition)
+    {
+        return new PaneRect(
+            initialBounds.X,
+            initialBounds.Y,
+            initialBounds.Width,
+            Math.Max(GetRuntimeLinkedMinHeight(initialBounds, minimumSize), edgePosition - initialBounds.Y));
+    }
+
+    private static void AddRuntimeLinkedEdgeConstraints(
+        PaneRect bounds,
+        WindowMinimumSize minimumSize,
+        ResizeEdge edge,
+        ref double minEdgePosition,
+        ref double maxEdgePosition)
+    {
+        switch (edge)
+        {
+            case ResizeEdge.Left:
+                maxEdgePosition = Math.Min(maxEdgePosition, GetRight(bounds) - GetRuntimeLinkedMinWidth(bounds, minimumSize));
+                break;
+            case ResizeEdge.Right:
+                minEdgePosition = Math.Max(minEdgePosition, bounds.X + GetRuntimeLinkedMinWidth(bounds, minimumSize));
+                break;
+            case ResizeEdge.Top:
+                maxEdgePosition = Math.Min(maxEdgePosition, GetBottom(bounds) - GetRuntimeLinkedMinHeight(bounds, minimumSize));
+                break;
+            case ResizeEdge.Bottom:
+                minEdgePosition = Math.Max(minEdgePosition, bounds.Y + GetRuntimeLinkedMinHeight(bounds, minimumSize));
+                break;
+        }
+    }
+
+    private static double ClampRuntimeLinkedEdgePosition(
+        RuntimeLinkedResizeSession session,
+        double edgePosition)
+    {
+        if (session.MinEdgePosition > session.MaxEdgePosition)
+        {
+            return Math.Abs(edgePosition - session.MinEdgePosition) < Math.Abs(edgePosition - session.MaxEdgePosition)
+                ? session.MinEdgePosition
+                : session.MaxEdgePosition;
+        }
+
+        return Math.Clamp(edgePosition, session.MinEdgePosition, session.MaxEdgePosition);
+    }
+
+    private static double GetRuntimeLinkedMinWidth(PaneRect bounds, WindowMinimumSize minimumSize)
+    {
+        return Math.Min(Math.Max(RuntimeLinkedResizeMinWidth, minimumSize.Width), Math.Max(1, bounds.Width));
+    }
+
+    private static double GetRuntimeLinkedMinHeight(PaneRect bounds, WindowMinimumSize minimumSize)
+    {
+        return Math.Min(Math.Max(RuntimeLinkedResizeMinHeight, minimumSize.Height), Math.Max(1, bounds.Height));
     }
 
     private static double GetEdgePosition(PaneRect bounds, ResizeEdge edge)
@@ -1252,16 +1446,6 @@ public partial class MainWindow : Window
     private static bool AreEdgesClose(double first, double second)
     {
         return Math.Abs(first - second) <= RuntimeLinkedResizeTolerance;
-    }
-
-    private static bool HasVerticalOverlap(PaneRect first, PaneRect second)
-    {
-        return Math.Min(GetBottom(first), GetBottom(second)) - Math.Max(first.Y, second.Y) > RuntimeLinkedResizeTolerance;
-    }
-
-    private static bool HasHorizontalOverlap(PaneRect first, PaneRect second)
-    {
-        return Math.Min(GetRight(first), GetRight(second)) - Math.Max(first.X, second.X) > RuntimeLinkedResizeTolerance;
     }
 
     private static double GetRight(PaneRect bounds)
@@ -1895,13 +2079,25 @@ public partial class MainWindow : Window
         IntPtr SourceWindowHandle,
         string DisplayId,
         PaneRect SourceInitialBounds,
+        WindowMinimumSize SourceMinimumSize,
+        WindowFrameAdjustment SourceFrameAdjustment,
         ResizeEdge Edge,
+        double MinEdgePosition,
+        double MaxEdgePosition,
         IReadOnlyList<RuntimeLinkedResizeNeighbor> Neighbors);
 
     private sealed record RuntimeLinkedResizeNeighbor(
         IntPtr WindowHandle,
         PaneRect InitialBounds,
+        RuntimeLinkedResizeSide Side,
+        WindowMinimumSize MinimumSize,
         WindowFrameAdjustment FrameAdjustment);
+
+    private enum RuntimeLinkedResizeSide
+    {
+        SameSide,
+        OppositeSide
+    }
 
     private enum ResizeEdge
     {
