@@ -126,6 +126,7 @@ public sealed class MainViewModel : ObservableObject
                 RaisePropertyChanged(nameof(CanvasSubtitle));
                 RaisePropertyChanged(nameof(StatusLine));
                 RaisePropertyChanged(nameof(SelectionLabel));
+                RaiseWindowBindingStatusChanged();
             }
         }
     }
@@ -159,6 +160,7 @@ public sealed class MainViewModel : ObservableObject
             if (SetProperty(ref _selectedNodeId, value))
             {
                 RaisePropertyChanged(nameof(SelectionLabel));
+                RaiseWindowBindingStatusChanged();
             }
         }
     }
@@ -191,6 +193,7 @@ public sealed class MainViewModel : ObservableObject
             RaisePropertyChanged(nameof(CurrentDisplaySummary));
             RaisePropertyChanged(nameof(CanvasSubtitle));
             RaisePropertyChanged(nameof(StatusLine));
+            RaiseWindowBindingStatusChanged();
 
             if (_suppressDisplaySelectionChange || value is null)
             {
@@ -250,6 +253,43 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public string SelectedRegionBindingSummary
+    {
+        get
+        {
+            if (!TryGetSelectedLeafRegion(out var displayId, out var nodeId))
+            {
+                return "当前还没有选中可绑定的区域。";
+            }
+
+            var binding = GetWindowBinding(_currentWorkspaceDocument, displayId, nodeId);
+            return binding is null
+                ? "当前区域还没有窗口绑定。"
+                : $"当前区域绑定：{binding.ProcessName}.exe";
+        }
+    }
+
+    public string SelectedRegionBindingDescription
+    {
+        get
+        {
+            if (!TryGetSelectedLeafRegion(out var displayId, out var nodeId))
+            {
+                return "先点击一个区域，再选择要绑定的窗口。第一版会按进程名恢复窗口，并优先参考绑定时记录的标题。";
+            }
+
+            var binding = GetWindowBinding(_currentWorkspaceDocument, displayId, nodeId);
+            if (binding is null)
+            {
+                return "绑定写入当前编辑布局。后续切换到这套吸附布局或重新打开工具时，可以恢复已绑定窗口。";
+            }
+
+            return string.IsNullOrWhiteSpace(binding.WindowTitleSnapshot)
+                ? $"恢复匹配会按 {binding.ProcessName}.exe 处理。"
+                : $"标题快照：{binding.WindowTitleSnapshot}";
+        }
+    }
+
     public string SelectionLabel
     {
         get
@@ -284,9 +324,84 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public bool IsCurrentLayoutDrivingSnapLayout => ShouldSyncActiveSnapWithCurrentWorkspace();
+
     public void SelectNode(string nodeId)
     {
         SelectedNodeId = nodeId;
+    }
+
+    public bool TryGetSelectedLeafRegion(out string displayId, out string nodeId)
+    {
+        displayId = SelectedDisplayItem?.Id ?? GetPrimaryDisplayId();
+        nodeId = SelectedNodeId ?? string.Empty;
+
+        return !string.IsNullOrWhiteSpace(nodeId)
+            && _queryService.IsLeaf(CurrentDocument, nodeId);
+    }
+
+    public bool TrySetSelectedRegionWindowBinding(string processName, string windowTitleSnapshot, out string message)
+    {
+        message = string.Empty;
+        if (!TryGetSelectedLeafRegion(out var displayId, out var nodeId))
+        {
+            message = "请先选中一个区域，再给它绑定窗口。";
+            return false;
+        }
+
+        var normalizedProcessName = processName.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedProcessName))
+        {
+            message = "无效的窗口进程名，无法保存绑定。";
+            return false;
+        }
+
+        PushUndoState();
+        _redoStack.Clear();
+        _currentWorkspaceDocument = UpsertWindowBinding(
+            _currentWorkspaceDocument,
+            new WorkspaceWindowBinding(
+                displayId,
+                nodeId,
+                normalizedProcessName,
+                windowTitleSnapshot.Trim()));
+        SyncActiveSnapWithCurrentWorkspaceIfNeeded();
+        UpdateDirtyState();
+        UpdateHistoryCommandStates();
+        RaiseWindowBindingStatusChanged();
+        message = $"当前区域已绑定到 {normalizedProcessName}.exe。";
+        return true;
+    }
+
+    public bool TryClearSelectedRegionWindowBinding(out string message)
+    {
+        message = string.Empty;
+        if (!TryGetSelectedLeafRegion(out var displayId, out var nodeId))
+        {
+            message = "请先选中一个区域，再清除绑定。";
+            return false;
+        }
+
+        if (GetWindowBinding(_currentWorkspaceDocument, displayId, nodeId) is null)
+        {
+            message = "当前区域还没有窗口绑定。";
+            return false;
+        }
+
+        PushUndoState();
+        _redoStack.Clear();
+        _currentWorkspaceDocument = RemoveWindowBinding(_currentWorkspaceDocument, displayId, nodeId);
+        SyncActiveSnapWithCurrentWorkspaceIfNeeded();
+        UpdateDirtyState();
+        UpdateHistoryCommandStates();
+        RaiseWindowBindingStatusChanged();
+        message = "当前区域的窗口绑定已清除。";
+        return true;
+    }
+
+    public IReadOnlyList<WorkspaceWindowBinding> GetActiveSnapWindowBindings()
+    {
+        return NormalizeWindowBindings(_activeSnapWorkspaceDocument.WindowBindings);
     }
 
     public DisplayInfo GetSelectedDisplay()
@@ -1170,7 +1285,7 @@ public sealed class MainViewModel : ObservableObject
             layouts[display.Id] = _editorService.CreateBlank(normalizedName);
         }
 
-        return new WorkspaceLayoutDocument(1, normalizedName, layouts);
+        return new WorkspaceLayoutDocument(1, normalizedName, layouts, new List<WorkspaceWindowBinding>());
     }
 
     private WorkspaceLayoutDocument NormalizeWorkspaceForCurrentDisplays(WorkspaceLayoutDocument workspace)
@@ -1199,7 +1314,11 @@ public sealed class MainViewModel : ObservableObject
             layouts[display.Id] = _editorService.CreateBlank(normalizedName);
         }
 
-        return new WorkspaceLayoutDocument(workspace.Version, normalizedName, layouts);
+        return new WorkspaceLayoutDocument(
+            workspace.Version,
+            normalizedName,
+            layouts,
+            NormalizeWindowBindings(workspace.WindowBindings));
     }
 
     private LayoutDocument GetDisplayLayout(WorkspaceLayoutDocument workspace, string? displayId)
@@ -1229,6 +1348,43 @@ public sealed class MainViewModel : ObservableObject
         return workspace with { DisplayLayouts = layouts };
     }
 
+    private static WorkspaceWindowBinding? GetWindowBinding(WorkspaceLayoutDocument workspace, string displayId, string nodeId)
+    {
+        return NormalizeWindowBindings(workspace.WindowBindings).FirstOrDefault(item =>
+            string.Equals(item.DisplayId, displayId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(item.NodeId, nodeId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static WorkspaceLayoutDocument UpsertWindowBinding(WorkspaceLayoutDocument workspace, WorkspaceWindowBinding binding)
+    {
+        var bindings = NormalizeWindowBindings(workspace.WindowBindings);
+        var index = bindings.FindIndex(item =>
+            string.Equals(item.DisplayId, binding.DisplayId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(item.NodeId, binding.NodeId, StringComparison.OrdinalIgnoreCase));
+
+        if (index >= 0)
+        {
+            bindings[index] = binding;
+        }
+        else
+        {
+            bindings.Add(binding);
+        }
+
+        return workspace with { WindowBindings = bindings };
+    }
+
+    private static WorkspaceLayoutDocument RemoveWindowBinding(WorkspaceLayoutDocument workspace, string displayId, string nodeId)
+    {
+        var bindings = NormalizeWindowBindings(workspace.WindowBindings)
+            .Where(item =>
+                !string.Equals(item.DisplayId, displayId, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(item.NodeId, nodeId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return workspace with { WindowBindings = bindings };
+    }
+
     private WorkspaceLayoutDocument RenameWorkspace(WorkspaceLayoutDocument workspace, string newName)
     {
         var normalizedName = NormalizeLayoutName(newName);
@@ -1252,6 +1408,14 @@ public sealed class MainViewModel : ObservableObject
         RaisePropertyChanged(nameof(ActiveSnapLayoutName));
         RaisePropertyChanged(nameof(ActiveSnapLayoutId));
         RaisePropertyChanged(nameof(SnapLayoutLabel));
+        RaiseWindowBindingStatusChanged();
+    }
+
+    private void RaiseWindowBindingStatusChanged()
+    {
+        RaisePropertyChanged(nameof(SelectedRegionBindingSummary));
+        RaisePropertyChanged(nameof(SelectedRegionBindingDescription));
+        RaisePropertyChanged(nameof(IsCurrentLayoutDrivingSnapLayout));
     }
 
     private bool ShouldSyncActiveSnapWithCurrentWorkspace()
@@ -1280,6 +1444,7 @@ public sealed class MainViewModel : ObservableObject
         RaisePropertyChanged(nameof(CurrentDisplaySummary));
         RaisePropertyChanged(nameof(CanvasSubtitle));
         RaisePropertyChanged(nameof(StatusLine));
+        RaiseWindowBindingStatusChanged();
         _suppressDisplaySelectionChange = false;
     }
 
@@ -1395,6 +1560,26 @@ public sealed class MainViewModel : ObservableObject
 
         cleaned = cleaned.Trim('-');
         return string.IsNullOrWhiteSpace(cleaned) ? "layout" : cleaned;
+    }
+
+    private static List<WorkspaceWindowBinding> NormalizeWindowBindings(IEnumerable<WorkspaceWindowBinding>? bindings)
+    {
+        return bindings?
+            .Where(item =>
+                !string.IsNullOrWhiteSpace(item.DisplayId)
+                && !string.IsNullOrWhiteSpace(item.NodeId)
+                && !string.IsNullOrWhiteSpace(item.ProcessName))
+            .Select(item => item with
+            {
+                DisplayId = item.DisplayId.Trim(),
+                NodeId = item.NodeId.Trim(),
+                ProcessName = item.ProcessName.Trim(),
+                WindowTitleSnapshot = item.WindowTitleSnapshot?.Trim() ?? string.Empty
+            })
+            .GroupBy(item => $"{item.DisplayId}::{item.NodeId}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList()
+            ?? new List<WorkspaceWindowBinding>();
     }
 
     private sealed record EditorHistoryState(WorkspaceLayoutDocument WorkspaceDocument, string? SelectedNodeId);

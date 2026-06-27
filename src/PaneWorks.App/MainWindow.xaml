@@ -263,6 +263,42 @@
                                 Background="#90101625"
                                 BorderBrush="#24FFFFFF"
                                 BorderThickness="1"
+                                CornerRadius="22">
+                            <StackPanel>
+                                <TextBlock FontSize="22"
+                                           FontWeight="SemiBold"
+                                           Text="区域绑定" />
+                                <TextBlock Margin="0,16,0,0"
+                                           FontWeight="SemiBold"
+                                           Foreground="#BFF7C7"
+                                           Text="{Binding SelectedRegionBindingSummary}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Margin="0,10,0,0"
+                                           Foreground="#D7E6FF"
+                                           Text="{Binding SelectedRegionBindingDescription}"
+                                           TextWrapping="Wrap" />
+                                <WrapPanel Margin="0,18,0,0">
+                                    <Button Margin="0,0,10,10"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Click="BindWindowButton_Click"
+                                            Content="选择窗口绑定" />
+                                    <Button Margin="0,0,10,10"
+                                            Style="{StaticResource SuccessButtonStyle}"
+                                            Click="RestoreBoundWindowsButton_Click"
+                                            Content="恢复绑定窗口" />
+                                    <Button Margin="0,0,0,10"
+                                            Style="{StaticResource DangerButtonStyle}"
+                                            Click="ClearWindowBindingButton_Click"
+                                            Content="清除绑定" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Margin="0,18,0,0"
+                                Padding="20"
+                                Background="#90101625"
+                                BorderBrush="#24FFFFFF"
+                                BorderThickness="1"
                                 CornerRadius="22"
                                 IsHitTestVisible="False">
                             <StackPanel>

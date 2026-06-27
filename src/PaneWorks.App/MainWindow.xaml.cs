@@ -1,17 +1,20 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PaneWorks.App.Controls;
 using PaneWorks.App.Diagnostics;
+using PaneWorks.App.Views;
 using PaneWorks.App.ViewModels;
 using PaneWorks.Core.Models;
 using PaneWorks.Core.Services;
 using PaneWorks.Infrastructure.Windows;
 using WpfApplication = System.Windows.Application;
 using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
+using WpfMessageBox = System.Windows.MessageBox;
 using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
 using WpfPoint = System.Windows.Point;
 using WpfTextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
@@ -308,6 +311,9 @@ public partial class MainWindow : Window
         EnsureSnapAssistStarted();
         _snapAssistHealthTimer.Start();
         PaneWorksLog.Info("Main window loaded");
+        Dispatcher.BeginInvoke(
+            () => RestoreBoundWindowsForActiveLayout(clearRuntimeState: false, notifyOnResult: false, reason: "startup"),
+            DispatcherPriority.Background);
     }
 
     private void MainWindow_StateChanged(object? sender, EventArgs e)
@@ -2159,6 +2165,9 @@ public partial class MainWindow : Window
     {
         ViewModel.SwitchSnapLayout(layoutId, notifyOnSuccess: false);
         ResetSnapRuntimeStateAfterLayoutSwitch();
+        Dispatcher.BeginInvoke(
+            () => RestoreBoundWindowsForActiveLayout(clearRuntimeState: false, notifyOnResult: false, reason: "layout-switch"),
+            DispatcherPriority.Background);
     }
 
     private void ResetSnapRuntimeStateAfterLayoutSwitch()
@@ -2215,6 +2224,317 @@ public partial class MainWindow : Window
     {
         ViewModel.OpenSettings();
     }
+
+    private void BindWindowButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.TryGetSelectedLeafRegion(out _, out var nodeId))
+        {
+            WpfMessageBox.Show(
+                this,
+                "请先点击一个区域，再给它绑定窗口。",
+                "PaneWorks",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var windows = _workspaceApplyService
+            .GetVisibleWindows(new WindowInteropHelper(this).Handle)
+            .OrderBy(item => item.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (windows.Count == 0)
+        {
+            WpfMessageBox.Show(
+                this,
+                "当前没有可绑定的桌面窗口。请先打开几个普通应用窗口再试。",
+                "PaneWorks",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new WindowBindingPickerDialog(
+            windows,
+            $"当前区域：{nodeId}  |  当前屏幕：{ViewModel.CurrentDisplayName}");
+        dialog.Owner = this;
+        dialog.Topmost = Topmost;
+
+        if (dialog.ShowDialog() != true || dialog.SelectedWindow is null)
+        {
+            return;
+        }
+
+        if (!ViewModel.TrySetSelectedRegionWindowBinding(
+                dialog.SelectedWindow.ProcessName,
+                dialog.SelectedWindow.Title,
+                out var message))
+        {
+            WpfMessageBox.Show(
+                this,
+                message,
+                "PaneWorks",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        WpfMessageBox.Show(
+            this,
+            $"{message} 切换到这套吸附布局或点击“恢复绑定窗口”后即可测试自动恢复。",
+            "PaneWorks",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
+    private void RestoreBoundWindowsButton_Click(object sender, RoutedEventArgs e)
+    {
+        RestoreBoundWindowsForActiveLayout(clearRuntimeState: false, notifyOnResult: true, reason: "manual");
+    }
+
+    private void ClearWindowBindingButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.TryClearSelectedRegionWindowBinding(out var message))
+        {
+            WpfMessageBox.Show(
+                this,
+                message,
+                "PaneWorks",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        WpfMessageBox.Show(
+            this,
+            message,
+            "PaneWorks",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
+    private void RestoreBoundWindowsForActiveLayout(bool clearRuntimeState, bool notifyOnResult, string reason)
+    {
+        var bindings = ViewModel.GetActiveSnapWindowBindings();
+        if (bindings.Count == 0)
+        {
+            if (clearRuntimeState)
+            {
+                _snapBindings.Clear();
+                _snapRuntimeBounds.Clear();
+            }
+
+            if (notifyOnResult)
+            {
+                WpfMessageBox.Show(
+                    this,
+                    "当前吸附布局还没有保存任何窗口绑定。",
+                    "PaneWorks",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return;
+        }
+
+        var visibleWindows = _workspaceApplyService
+            .GetVisibleWindows(new WindowInteropHelper(this).Handle)
+            .ToList();
+
+        if (visibleWindows.Count == 0)
+        {
+            if (notifyOnResult)
+            {
+                WpfMessageBox.Show(
+                    this,
+                    "当前没有找到可恢复的桌面窗口。",
+                    "PaneWorks",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return;
+        }
+
+        var matches = MatchWindowBindings(bindings, visibleWindows);
+        if (matches.Count == 0)
+        {
+            if (notifyOnResult)
+            {
+                WpfMessageBox.Show(
+                    this,
+                    "当前没有找到和已绑定规则匹配的窗口。",
+                    "PaneWorks",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return;
+        }
+
+        if (clearRuntimeState)
+        {
+            _snapBindings.Clear();
+            _snapRuntimeBounds.Clear();
+        }
+
+        var restoredCount = 0;
+        var geometryByDisplay = new Dictionary<string, IReadOnlyDictionary<string, ComputedRegion>>(StringComparer.OrdinalIgnoreCase);
+
+        BeginInternalWindowLayoutUpdate();
+        try
+        {
+            foreach (var match in matches)
+            {
+                if (!TryGetBindingRegion(match.Binding, geometryByDisplay, out var region))
+                {
+                    continue;
+                }
+
+                RemoveRuntimeBindingForRegion(match.Binding.DisplayId, match.Binding.NodeId, match.Window.Handle);
+
+                var restoreBounds = ResolveRestoreBoundsForSnap(match.Window.Handle);
+                _snapBindings[match.Window.Handle] = new SnapBindingState(
+                    match.Binding.NodeId,
+                    match.Binding.DisplayId,
+                    restoreBounds);
+                _snapRuntimeBounds[match.Window.Handle] = region.Bounds;
+                _workspaceApplyService.SnapWindowToBounds(match.Window.Handle, region.Bounds);
+                restoredCount++;
+            }
+        }
+        finally
+        {
+            EndInternalWindowLayoutUpdate();
+        }
+
+        PaneWorksLog.Info($"Window binding restore: reason={reason}, bindings={bindings.Count}, matched={matches.Count}, restored={restoredCount}");
+
+        if (notifyOnResult)
+        {
+            WpfMessageBox.Show(
+                this,
+                restoredCount > 0
+                    ? $"已按当前吸附布局恢复 {restoredCount} 个已绑定窗口。"
+                    : "这次没有成功恢复任何已绑定窗口。",
+                "PaneWorks",
+                MessageBoxButton.OK,
+                restoredCount > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+    }
+
+    private bool TryGetBindingRegion(
+        WorkspaceWindowBinding binding,
+        Dictionary<string, IReadOnlyDictionary<string, ComputedRegion>> geometryByDisplay,
+        out ComputedRegion region)
+    {
+        region = default!;
+
+        if (!ViewModel.TryGetDisplayById(binding.DisplayId, out var display))
+        {
+            return false;
+        }
+
+        if (!geometryByDisplay.TryGetValue(display.Id, out var regionsById))
+        {
+            var geometry = _geometryCalculator.Compute(
+                ViewModel.GetSnapLayoutDocumentForDisplay(display.Id),
+                GetSnapTargetStageBounds(display),
+                SnapTargetSplitterThickness);
+            regionsById = geometry.Regions.ToDictionary(item => item.NodeId, StringComparer.Ordinal);
+            geometryByDisplay[display.Id] = regionsById;
+        }
+
+        if (regionsById is null)
+        {
+            return false;
+        }
+
+        if (!regionsById.TryGetValue(binding.NodeId, out var foundRegion))
+        {
+            return false;
+        }
+
+        region = foundRegion;
+        return true;
+    }
+
+    private void RemoveRuntimeBindingForRegion(string displayId, string nodeId, IntPtr keepWindowHandle)
+    {
+        foreach (var handle in _snapBindings
+                     .Where(item =>
+                         item.Key != keepWindowHandle
+                         && string.Equals(item.Value.DisplayId, displayId, StringComparison.OrdinalIgnoreCase)
+                         && string.Equals(item.Value.NodeId, nodeId, StringComparison.OrdinalIgnoreCase))
+                     .Select(item => item.Key)
+                     .ToList())
+        {
+            _snapBindings.Remove(handle);
+            _snapRuntimeBounds.Remove(handle);
+        }
+    }
+
+    private static List<MatchedWindowBinding> MatchWindowBindings(
+        IReadOnlyList<WorkspaceWindowBinding> bindings,
+        IReadOnlyList<VisibleWindowInfo> windows)
+    {
+        var remainingWindows = windows.ToList();
+        var matches = new List<MatchedWindowBinding>();
+
+        foreach (var binding in bindings)
+        {
+            var match = remainingWindows
+                .Select(window => new
+                {
+                    Window = window,
+                    Score = ScoreWindowBinding(binding, window)
+                })
+                .Where(item => item.Score > 0)
+                .OrderByDescending(item => item.Score)
+                .ThenBy(item => item.Window.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Window.Title, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+
+            if (match is null)
+            {
+                continue;
+            }
+
+            matches.Add(new MatchedWindowBinding(binding, match.Window));
+            remainingWindows.Remove(match.Window);
+        }
+
+        return matches;
+    }
+
+    private static int ScoreWindowBinding(WorkspaceWindowBinding binding, VisibleWindowInfo window)
+    {
+        if (!string.Equals(binding.ProcessName, window.ProcessName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        if (string.IsNullOrWhiteSpace(binding.WindowTitleSnapshot))
+        {
+            return 10;
+        }
+
+        if (string.Equals(binding.WindowTitleSnapshot, window.Title, StringComparison.OrdinalIgnoreCase))
+        {
+            return 30;
+        }
+
+        if (window.Title.Contains(binding.WindowTitleSnapshot, StringComparison.OrdinalIgnoreCase)
+            || binding.WindowTitleSnapshot.Contains(window.Title, StringComparison.OrdinalIgnoreCase))
+        {
+            return 20;
+        }
+
+        return 10;
+    }
+
+    private sealed record MatchedWindowBinding(WorkspaceWindowBinding Binding, VisibleWindowInfo Window);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]

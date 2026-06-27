@@ -248,6 +248,34 @@ public sealed class WorkspaceApplyService
         _ = ReleaseCapture();
     }
 
+    public IReadOnlyList<VisibleWindowInfo> GetVisibleWindows(IntPtr excludedWindowHandle)
+    {
+        return EnumerateCandidateWindows(excludedWindowHandle)
+            .Select(item => new VisibleWindowInfo(item.Handle, item.ProcessName, item.Title))
+            .ToList();
+    }
+
+    public bool TryGetVisibleWindowInfo(IntPtr windowHandle, IntPtr excludedWindowHandle, out VisibleWindowInfo windowInfo)
+    {
+        windowInfo = default!;
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var currentProcessId = Environment.ProcessId;
+        var shellWindow = GetShellWindow();
+        var context = new EnumerationContext(new List<WindowCandidate>(), excludedWindowHandle, shellWindow, currentProcessId);
+
+        if (!TryCreateWindowCandidate(windowHandle, context, out var candidate))
+        {
+            return false;
+        }
+
+        windowInfo = new VisibleWindowInfo(candidate.Handle, candidate.ProcessName, candidate.Title);
+        return true;
+    }
+
     private static bool TryGetCursorPosition(out NativePoint point)
     {
         return GetCursorPos(out point);
@@ -413,32 +441,11 @@ public sealed class WorkspaceApplyService
                 static (handle, parameter) =>
                 {
                     var context = (EnumerationContext)GCHandle.FromIntPtr(parameter).Target!;
-
-                    if (handle == IntPtr.Zero
-                        || handle == context.ExcludedWindowHandle
-                        || handle == context.ShellWindow
-                        || !IsWindowVisible(handle)
-                        || IsIconic(handle)
-                        || GetWindow(handle, GetWindowCommand.Owner) != IntPtr.Zero
-                        || IsToolWindow(handle)
-                        || IsCloaked(handle))
+                    if (TryCreateWindowCandidate(handle, context, out var candidate))
                     {
-                        return true;
+                        context.Windows.Add(candidate);
                     }
 
-                    GetWindowThreadProcessId(handle, out var processId);
-                    if (processId == context.CurrentProcessId)
-                    {
-                        return true;
-                    }
-
-                    var title = GetWindowTitle(handle);
-                    if (string.IsNullOrWhiteSpace(title))
-                    {
-                        return true;
-                    }
-
-                    context.Windows.Add(new WindowCandidate(handle, title));
                     return true;
                 },
                 GCHandle.ToIntPtr(contextHandle));
@@ -454,6 +461,44 @@ public sealed class WorkspaceApplyService
         return windows;
     }
 
+    private static bool TryCreateWindowCandidate(IntPtr handle, EnumerationContext context, out WindowCandidate candidate)
+    {
+        candidate = default!;
+
+        if (handle == IntPtr.Zero
+            || handle == context.ExcludedWindowHandle
+            || handle == context.ShellWindow
+            || !IsWindowVisible(handle)
+            || IsIconic(handle)
+            || GetWindow(handle, GetWindowCommand.Owner) != IntPtr.Zero
+            || IsToolWindow(handle)
+            || IsCloaked(handle))
+        {
+            return false;
+        }
+
+        GetWindowThreadProcessId(handle, out var processId);
+        if (processId == context.CurrentProcessId)
+        {
+            return false;
+        }
+
+        var title = GetWindowTitle(handle);
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return false;
+        }
+
+        var processName = GetProcessName(processId);
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            return false;
+        }
+
+        candidate = new WindowCandidate(handle, processName, title);
+        return true;
+    }
+
     private static string GetWindowTitle(IntPtr handle)
     {
         var length = GetWindowTextLength(handle);
@@ -465,6 +510,19 @@ public sealed class WorkspaceApplyService
         var builder = new StringBuilder(length + 1);
         _ = GetWindowText(handle, builder, builder.Capacity);
         return builder.ToString();
+    }
+
+    private static string GetProcessName(uint processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            return process.ProcessName;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static bool IsToolWindow(IntPtr handle)
@@ -496,7 +554,7 @@ public sealed class WorkspaceApplyService
         }
     }
 
-    private sealed record WindowCandidate(IntPtr Handle, string Title);
+    private sealed record WindowCandidate(IntPtr Handle, string ProcessName, string Title);
 
     private sealed record EnumerationContext(
         List<WindowCandidate> Windows,
