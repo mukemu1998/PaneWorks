@@ -17,6 +17,7 @@ namespace PaneWorks.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
+    private const string DefaultBlankWorkspaceName = "起始空白布局";
     private readonly LayoutEditorService _editorService = new();
     private readonly LayoutTreeQueryService _queryService = new();
     private readonly DisplayDiscoveryService _displayDiscoveryService = new();
@@ -59,7 +60,7 @@ public sealed class MainViewModel : ObservableObject
 
         RefreshDisplays();
 
-        _currentWorkspaceDocument = CreateWorkspaceDocument("起始布局");
+        _currentWorkspaceDocument = CreateWorkspaceDocument(DefaultBlankWorkspaceName);
         _activeSnapWorkspaceDocument = _currentWorkspaceDocument;
         _currentDocument = GetDisplayLayout(_currentWorkspaceDocument, GetPrimaryDisplayId());
         _activeSnapLayoutName = "当前编辑布局";
@@ -496,7 +497,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        _currentWorkspaceDocument = CreateWorkspaceDocument($"布局 {Layouts.Count + 1}");
+        _currentWorkspaceDocument = CreateWorkspaceDocument(DefaultBlankWorkspaceName);
         _currentLayoutId = null;
         _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
         IsDirty = false;
@@ -646,7 +647,7 @@ public sealed class MainViewModel : ObservableObject
 
             if (string.Equals(_currentLayoutId, deletedLayoutId, StringComparison.OrdinalIgnoreCase))
             {
-                _currentWorkspaceDocument = CreateWorkspaceDocument("起始布局");
+                _currentWorkspaceDocument = CreateWorkspaceDocument(DefaultBlankWorkspaceName);
                 _currentLayoutId = null;
                 _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
                 IsDirty = false;
@@ -969,7 +970,7 @@ public sealed class MainViewModel : ObservableObject
             }
             catch
             {
-                _currentWorkspaceDocument = CreateWorkspaceDocument("起始布局");
+                _currentWorkspaceDocument = CreateWorkspaceDocument(DefaultBlankWorkspaceName);
                 _currentLayoutId = null;
             }
         }
