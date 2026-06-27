@@ -4,84 +4,75 @@
   <img src="docs/images/PaneWorks-home.png" width="220" alt="PaneWorks 项目图标" />
 </p>
 
-PaneWorks 是一个面向 Windows 的桌面工作区分割与窗口吸附工具。
+<p align="center">
+  <strong>面向 Windows 的桌面工作区分割与窗口吸附工具</strong>
+</p>
 
-当前版本已经支持：
+<p align="center">
+  在完整桌面上编辑分割线，保存自定义多屏布局，并通过快捷键让窗口按当前布局即时吸附。
+</p>
 
-- 透明全屏布局编辑
-- 递归分割、删除分割、拖动分割线调比例
-- 布局保存、加载、删除
-- 自定义快捷键触发窗口吸附
-- 托盘最小化与托盘快速切换布局
-- 多显示器布局合并保存与跨屏吸附预览
-- 吸附窗口拖出后立即恢复吸附前尺寸
-- 已吸附窗口共享边缘的运行时联动调整
-- Windows 自包含免依赖发布
+<p align="center">
+  <a href="https://github.com/mukemu1998/PaneWorks/releases">下载发布版</a> ·
+  <a href="./CHANGELOG.md">更新记录</a> ·
+  <a href="./docs/technical-design.zh-CN.md">技术设计</a> ·
+  <a href="./docs/github-release-guide.zh-CN.md">发布指南</a>
+</p>
 
-## 仓库结构
+<p align="center">
+  <img alt="Windows 10/11" src="https://img.shields.io/badge/Windows-10%20%2F%2011-2d7dff" />
+  <img alt=".NET 8" src="https://img.shields.io/badge/.NET-8-512bd4" />
+  <img alt="WPF" src="https://img.shields.io/badge/UI-WPF-111827" />
+  <img alt="Version 0.1.0" src="https://img.shields.io/badge/Version-0.1.0-22c55e" />
+</p>
 
-```text
-PaneWorks/
-  src/
-    PaneWorks.App/             WPF 桌面应用
-    PaneWorks.Core/            布局模型与核心逻辑
-    PaneWorks.Infrastructure/  持久化与 Win32 集成
-  docs/
-    technical-design.md
-    technical-design.zh-CN.md
-    portable-readme.zh-CN.md
-    release-notes-v0.1.0.zh-CN.md
-    github-release-guide.zh-CN.md
-  scripts/
-    package_portable.ps1
-  artifacts/                   发布产物输出目录（已忽略）
-```
+## 项目简介
 
-## 本地开发环境
+PaneWorks 不是固定模板式分屏工具，而是一个允许用户自己定义桌面工作区边界的 Windows 应用。它围绕“先搭布局，再吸附窗口”的工作流设计，重点放在透明桌面编辑、跨屏布局、托盘切换和稳定的窗口吸附体验上。
 
-- Windows 10 / 11
-- .NET 8 SDK
+## 核心能力
 
-## 本地运行
+| 能力 | 说明 |
+| --- | --- |
+| 透明桌面编辑 | 直接在桌面透明分割层上编辑布局，只显示分割线，不局限在小工具窗口内部。 |
+| 自定义区域分割 | 支持递归横向、纵向、二等分、三等分分割，并可删除分割、拖动边界调比例。 |
+| 多显示器合并布局 | 多个屏幕的布局可保存到同一个文件中，切换后可同时在多个屏幕生效。 |
+| 快捷键吸附 | 按住自定义触发键拖动窗口时显示布局预览，进入区域后自动高亮并完成吸附。 |
+| 运行时联动调整 | 已吸附窗口支持共享边缘联动调整，不改写原始吸附布局。 |
+| 自包含发布 | 提供 Windows 自包含便携包，普通用户无需额外安装 .NET Runtime。 |
+
+## 适用场景
+
+- 需要比 Windows 自带布局更自由的分屏方式
+- 使用多显示器进行浏览器、文档、聊天、终端协同工作
+- 希望保留自己的工作区模板，并在不同布局之间快速切换
+- 想要可直接分发、开箱即用的 Windows 桌面工具
+
+## 快速开始
+
+### 普通使用
+
+1. 前往 [Releases](https://github.com/mukemu1998/PaneWorks/releases) 下载最新便携版压缩包。
+2. 解压后双击 `PaneWorks.App.exe`。
+3. 首次运行后，布局与设置会保存到 `%AppData%\PaneWorks\`。
+
+### 本地开发
+
+- 系统环境：Windows 10 / 11
+- SDK 要求：.NET 8 SDK
 
 ```powershell
 & 'C:\Program Files\dotnet\dotnet.exe' build .\PaneWorks.sln
 & 'C:\Program Files\dotnet\dotnet.exe' run --project .\src\PaneWorks.App\PaneWorks.App.csproj
 ```
 
-## 版本迭代方式
-
-PaneWorks 现在已经适合按“小步发布”的方式持续迭代。推荐约定如下：
-
-1. 只在 [Directory.Build.props](./Directory.Build.props) 里维护版本号。
-2. 每次发布前只做三件事：
-   - 修改 `VersionPrefix`
-   - 运行打包脚本
-   - 更新 `CHANGELOG.md` 和 GitHub Release 说明
-3. 对外发布说明默认写中文，不只写技术改动，也说明用户能感知到的变化。
-
-版本号建议：
-
-- `0.1.x`：原型打磨阶段
-- `0.2.x`：多显示器、窗口兼容性、区域绑定等核心能力补齐
-- `1.0.0`：日常使用稳定后正式进入第一版
-
-## 免依赖打包
-
-项目已经带好一键打包脚本：
+### 便携版打包
 
 ```powershell
 & 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -ExecutionPolicy Bypass -File .\scripts\package_portable.ps1
 ```
 
-默认行为：
-
-- 发布 `win-x64`
-- `Release` 自包含
-- 单文件 exe
-- 自动输出 zip
-
-发布产物目录：
+默认输出目录：
 
 ```text
 artifacts/
@@ -90,24 +81,26 @@ artifacts/
       PaneWorks-v0.1.0-win-x64-portable.zip
 ```
 
-## GitHub 更新与上传
+## 项目结构
 
-完整中文操作说明见：
+```text
+PaneWorks/
+  src/
+    PaneWorks.App/             WPF 桌面应用
+    PaneWorks.Core/            布局模型与核心逻辑
+    PaneWorks.Infrastructure/  持久化与 Win32 集成
+  docs/                        中文说明、设计文档与发布说明
+  scripts/                     打包与辅助脚本
+```
 
+## 文档导航
+
+- [更新记录](./CHANGELOG.md)
+- [中文技术设计](./docs/technical-design.zh-CN.md)
+- [Technical Design](./docs/technical-design.md)
+- [便携版使用说明](./docs/portable-readme.zh-CN.md)
 - [GitHub 更新与发布指南](./docs/github-release-guide.zh-CN.md)
 
-源码仓库建议上传：
+## 当前版本
 
-- `src/`
-- `docs/`
-- `scripts/`
-- `README.md`
-- `CHANGELOG.md`
-- `PaneWorks.sln`
-- `Directory.Build.props`
-
-GitHub Release 建议额外上传：
-
-- `PaneWorks-v0.1.0-win-x64-portable.zip`
-
-这样开发者可以直接拉源码继续开发，普通用户也可以直接下载 zip 解压运行，不需要额外安装 .NET。
+当前版本为 `0.1.0`，处于原型打磨与持续迭代阶段。用户自建布局与个人设置保存在 `%AppData%\PaneWorks\`，不会写入仓库源码目录。
