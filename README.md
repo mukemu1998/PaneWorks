@@ -98,15 +98,6 @@ PaneWorks/
   scripts/                     打包与辅助脚本
 ```
 
-## 文档导航
-
-- [更新记录](./CHANGELOG.md)
-- [v0.1.1 发布说明](./docs/release-notes-v0.1.1.zh-CN.md)
-- [中文技术设计](./docs/technical-design.zh-CN.md)
-- [Technical Design](./docs/technical-design.md)
-- [便携版使用说明](./docs/PORTABLE_README.md)
-- [GitHub 更新与发布指南](./docs/github-release-guide.zh-CN.md)
-
 ## 当前版本
 
 当前版本为 `0.1.1`，处于原型打磨与持续迭代阶段。用户自建布局与个人设置保存在 `%AppData%\PaneWorks\`，不会写入仓库源码目录。
