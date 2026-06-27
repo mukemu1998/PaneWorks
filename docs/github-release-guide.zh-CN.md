@@ -12,7 +12,7 @@
 4. 更新 `CHANGELOG.md`
 5. 生成便携版压缩包
 6. 提交并推送源码到 GitHub
-7. 在 GitHub Release 页面上传 zip 并填写中文发布说明
+7. 在 GitHub Release 页面上传 zip 与校验文件，并填写中文发布说明
 
 补充建议：
 
@@ -22,7 +22,7 @@
 
 版本号统一在：
 
-- [Directory.Build.props](E:\GITHUB\PaneWorks\Directory.Build.props)
+- [Directory.Build.props](../Directory.Build.props)
 
 只需要修改：
 
@@ -44,11 +44,11 @@
 
 如果当前程序还在运行，先关闭它再编译。
 
-## 3. 更新更新记录
+## 3. 更新记录
 
 在：
 
-- [CHANGELOG.md](E:\GITHUB\PaneWorks\CHANGELOG.md)
+- [CHANGELOG.md](../CHANGELOG.md)
 
 追加一个新版本条目，建议按下面这种中文结构写：
 
@@ -76,7 +76,7 @@
 & 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -ExecutionPolicy Bypass -File .\scripts\package_portable.ps1
 ```
 
-成功后会在这里产出 zip：
+成功后会在这里产出发布目录：
 
 ```text
 artifacts\releases\v版本号\
@@ -86,6 +86,7 @@ artifacts\releases\v版本号\
 
 ```text
 artifacts\releases\v0.1.0\PaneWorks-v0.1.0-win-x64-portable.zip
+artifacts\releases\v0.1.0\PaneWorks-v0.1.0-win-x64-portable.zip.sha256
 ```
 
 ## 5. 提交并推送源码
@@ -124,7 +125,7 @@ PaneWorks v0.1.0
 ```
 
 5. 发布说明用中文填写
-6. 上传对应版本的 zip 文件
+6. 上传对应版本的 `zip` 与 `.sha256` 文件
 7. 点击发布
 
 ## 7. 发布说明建议写法
@@ -151,7 +152,7 @@ PaneWorks v0.1.0
 
 首版发布说明可以直接参考：
 
-- [release-notes-v0.1.0.zh-CN.md](E:\GITHUB\PaneWorks\docs\release-notes-v0.1.0.zh-CN.md)
+- [release-notes-v0.1.0.zh-CN.md](./release-notes-v0.1.0.zh-CN.md)
 
 ## 8. 推荐习惯
 
@@ -159,7 +160,9 @@ PaneWorks v0.1.0
 - Release 说明统一写中文
 - 每次发版前先更新 `CHANGELOG.md`
 - 每次发版后保留对应版本的 zip 产物
+- 每次发版后保留对应版本的 `.sha256` 校验文件
 - 不要把 `artifacts/` 整个提交进 Git 仓库
+- 如果线上已有同版本 Release，但本地代码已经明显超前，优先升一个新版本号，不要直接拿新产物覆盖旧版本语义
 
 ## 9. 最短发布流程
 
@@ -170,4 +173,4 @@ PaneWorks v0.1.0
 3. 更新 `CHANGELOG.md`
 4. 跑 `package_portable.ps1`
 5. `git add / commit / push`
-6. 去 GitHub Release 上传 zip 并填写中文说明
+6. 去 GitHub Release 上传 zip 与 `.sha256` 并填写中文说明

@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $appProject = Join-Path $repoRoot "src\PaneWorks.App\PaneWorks.App.csproj"
 $propsPath = Join-Path $repoRoot "Directory.Build.props"
-$portableReadme = Join-Path $repoRoot "docs\portable-readme.zh-CN.md"
+$portableReadme = Join-Path $repoRoot "docs\PORTABLE_README.md"
 $dotnet = "C:\Program Files\dotnet\dotnet.exe"
 
 # Keep the portable bundle minimal and ready to unzip-run.
@@ -26,6 +26,7 @@ $releaseRoot = Join-Path $repoRoot "artifacts\releases\v$version"
 $publishRoot = Join-Path $releaseRoot "publish"
 $packageRoot = Join-Path $releaseRoot "PaneWorks-v$version-$Runtime-portable"
 $zipPath = Join-Path $releaseRoot "PaneWorks-v$version-$Runtime-portable.zip"
+$hashPath = Join-Path $releaseRoot "PaneWorks-v$version-$Runtime-portable.zip.sha256"
 
 Write-Host "==> Clean old artifacts"
 if (Test-Path $releaseRoot) {
@@ -52,11 +53,17 @@ Write-Host "==> Publish self-contained single-file build"
 
 Write-Host "==> Prepare portable package"
 Copy-Item -LiteralPath (Join-Path $publishRoot "PaneWorks.App.exe") -Destination $packageRoot
-Copy-Item -LiteralPath $portableReadme -Destination (Join-Path $packageRoot "README.zh-CN.md")
+Copy-Item -LiteralPath $portableReadme -Destination (Join-Path $packageRoot "README.md")
+Set-Content -LiteralPath (Join-Path $packageRoot "VERSION") -Value "v$version" -Encoding ASCII
 
 Write-Host "==> Create zip archive"
 Compress-Archive -Path (Join-Path $packageRoot "*") -DestinationPath $zipPath -Force
 
+Write-Host "==> Generate SHA256"
+$hash = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLowerInvariant()
+Set-Content -LiteralPath $hashPath -Value "$hash *$(Split-Path -Leaf $zipPath)" -Encoding ASCII
+
 Write-Host ""
 Write-Host "Package created:"
 Write-Host $zipPath
+Write-Host $hashPath
