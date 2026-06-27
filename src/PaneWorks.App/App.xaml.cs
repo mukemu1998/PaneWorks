@@ -94,7 +94,7 @@ public partial class App : Wpf.Application
         _notifyIcon = new Forms.NotifyIcon
         {
             Text = "PaneWorks",
-            Icon = Drawing.SystemIcons.Application,
+            Icon = LoadNotifyIcon(),
             Visible = true
         };
 
@@ -302,6 +302,27 @@ public partial class App : Wpf.Application
         }
 
         _mainWindow.Dispatcher.BeginInvoke(action);
+    }
+
+    private static Drawing.Icon LoadNotifyIcon()
+    {
+        try
+        {
+            var processPath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(processPath))
+            {
+                var icon = Drawing.Icon.ExtractAssociatedIcon(processPath);
+                if (icon is not null)
+                {
+                    return (Drawing.Icon)icon.Clone();
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return (Drawing.Icon)Drawing.SystemIcons.Application.Clone();
     }
 
 }

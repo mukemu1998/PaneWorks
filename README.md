@@ -1,5 +1,9 @@
 # PaneWorks
 
+<p align="center">
+  <img src="docs/images/PaneWorks-home.png" width="220" alt="PaneWorks 项目图标" />
+</p>
+
 PaneWorks 是一个面向 Windows 的桌面工作区分割与窗口吸附工具。
 
 当前版本已经支持：
@@ -62,7 +66,7 @@ PaneWorks/
 
 PaneWorks 现在已经适合按“小步发布”的方式持续迭代。推荐约定如下：
 
-1. 只在 [Directory.Build.props](E:\GITHUB\PaneWorks\Directory.Build.props) 里维护版本号。
+1. 只在 [Directory.Build.props](./Directory.Build.props) 里维护版本号。
 2. 每次发布前只做三件事：
    - 修改 `VersionPrefix`
    - 运行打包脚本
@@ -103,7 +107,7 @@ artifacts/
 
 完整中文操作说明见：
 
-- [GitHub 更新与发布指南](E:\GITHUB\PaneWorks\docs\github-release-guide.zh-CN.md)
+- [GitHub 更新与发布指南](./docs/github-release-guide.zh-CN.md)
 
 源码仓库建议上传：
 

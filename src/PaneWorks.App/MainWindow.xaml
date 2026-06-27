@@ -10,6 +10,7 @@
         Height="960"
         MinWidth="1280"
         MinHeight="760"
+        Icon="Assets/PaneWorks.png"
         WindowState="Normal"
         WindowStyle="None"
         ResizeMode="NoResize"

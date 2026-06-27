@@ -8,10 +8,15 @@
     <Nullable>enable</Nullable>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\PaneWorks.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\PaneWorks.Core\PaneWorks.Core.csproj" />
     <ProjectReference Include="..\PaneWorks.Infrastructure\PaneWorks.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\PaneWorks.png" />
   </ItemGroup>
 </Project>
