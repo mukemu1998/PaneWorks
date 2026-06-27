@@ -33,7 +33,7 @@
 例如下一次发版可以改成：
 
 ```xml
-<VersionPrefix>0.1.1</VersionPrefix>
+<VersionPrefix>0.1.2</VersionPrefix>
 ```
 
 ## 2. 本地编译
@@ -85,8 +85,8 @@ artifacts\releases\v版本号\
 例如：
 
 ```text
-artifacts\releases\v0.1.0\PaneWorks-v0.1.0-win-x64-portable.zip
-artifacts\releases\v0.1.0\PaneWorks-v0.1.0-win-x64-portable.zip.sha256
+artifacts\releases\v0.1.1\PaneWorks-v0.1.1-win-x64-portable.zip
+artifacts\releases\v0.1.1\PaneWorks-v0.1.1-win-x64-portable.zip.sha256
 ```
 
 ## 5. 提交并推送源码
@@ -117,11 +117,11 @@ artifacts\releases\v0.1.0\PaneWorks-v0.1.0-win-x64-portable.zip.sha256
 
 1. 打开 `Releases`
 2. 点击 `Draft a new release`
-3. Tag 建议用版本号，例如 `v0.1.0`
+3. Tag 建议用版本号，例如 `v0.1.1`
 4. Title 建议写：
 
 ```text
-PaneWorks v0.1.0
+PaneWorks v0.1.1
 ```
 
 5. 发布说明用中文填写
@@ -150,9 +150,9 @@ PaneWorks v0.1.0
 - ...
 ```
 
-首版发布说明可以直接参考：
+最近一次发布说明可以直接参考：
 
-- [release-notes-v0.1.0.zh-CN.md](./release-notes-v0.1.0.zh-CN.md)
+- [release-notes-v0.1.1.zh-CN.md](./release-notes-v0.1.1.zh-CN.md)
 
 ## 8. 推荐习惯
 
