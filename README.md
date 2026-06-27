@@ -15,7 +15,6 @@
 <p align="center">
   <a href="https://github.com/mukemu1998/PaneWorks/releases">下载发布版</a> ·
   <a href="./CHANGELOG.md">更新记录</a> ·
-  <a href="./docs/technical-design.zh-CN.md">技术设计</a> ·
   <a href="./docs/github-release-guide.zh-CN.md">发布指南</a>
 </p>
 
@@ -94,7 +93,7 @@ PaneWorks/
     PaneWorks.App/             WPF 桌面应用
     PaneWorks.Core/            布局模型与核心逻辑
     PaneWorks.Infrastructure/  持久化与 Win32 集成
-  docs/                        中文说明、设计文档与发布说明
+  docs/                        中文说明与发布文档
   scripts/                     打包与辅助脚本
 ```
 
