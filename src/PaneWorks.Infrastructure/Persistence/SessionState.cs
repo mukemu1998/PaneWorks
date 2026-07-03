@@ -8,6 +8,8 @@ public sealed record SessionState
 
     public string? LastSnapLayoutId { get; init; }
 
+    public string? LastWorkspaceProfileId { get; init; }
+
     public string? SelectedDisplayId { get; init; }
 
     public Dictionary<string, string?> DisplayLayoutIds { get; init; } = new(StringComparer.OrdinalIgnoreCase);

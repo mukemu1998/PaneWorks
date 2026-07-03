@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -38,18 +40,39 @@ public partial class MainWindow : Window
     private const double DragAnchorMinOffsetY = 12;
     private const double DragAnchorMaxOffsetY = 48;
     private const int VirtualKeyLeftButton = 0x01;
+    private const int Win32ErrorAccessDenied = 5;
+    private const uint GetAncestorRoot = 2;
+    private const uint GetWindowNext = 2;
     private static readonly bool EnableRuntimeLinkedResize = true;
     private static readonly TimeSpan DetachedRestoreApplyInterval = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan InternalLayoutMoveSuppressDuration = TimeSpan.FromMilliseconds(450);
+    private static readonly TimeSpan WorkspaceLaunchInitialRestoreDelay = TimeSpan.FromMilliseconds(700);
+    private static readonly TimeSpan WorkspaceLaunchRestoreRetryInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan WorkspaceLaunchRestoreTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan[] WorkspaceLaunchSnapStabilizationDelays =
+    {
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(3),
+        TimeSpan.FromSeconds(6),
+        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(20),
+        TimeSpan.FromSeconds(30),
+        TimeSpan.FromSeconds(45),
+        TimeSpan.FromSeconds(60)
+    };
     private readonly WindowMoveMonitor _windowMoveMonitor = new();
     private readonly WorkspaceApplyService _workspaceApplyService = new();
     private readonly LayoutGeometryCalculator _geometryCalculator = new();
+    private readonly LayoutEditorService _runtimeSessionLayoutEditorService = new();
     private readonly SplitResizeService _splitResizeService = new();
     private readonly DisplayDiscoveryService _displayDiscoveryService = new();
     private readonly DispatcherTimer _snapAssistTimer;
     private readonly DispatcherTimer _snapAssistHealthTimer;
+    private readonly DispatcherTimer _snapAssistFallbackTimer;
     private readonly Dictionary<IntPtr, SnapBindingState> _snapBindings = new();
     private readonly Dictionary<IntPtr, PaneRect> _snapRuntimeBounds = new();
+    private readonly Dictionary<IntPtr, VisibleWindowInfo> _snapWindowInfoCache = new();
+    private readonly Dictionary<string, LayoutDocument> _sessionSnapLayoutDocuments = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SnapOverlayWindow> _snapOverlayWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<IntPtr, DateTimeOffset> _snapSuppressUntilByWindow = new();
     private PaneRect _virtualDesktopBounds;
@@ -82,6 +105,11 @@ public partial class MainWindow : Window
     private bool _movingWindowDetachedFromSnapGroup;
     private bool _movingWindowDetachCandidate;
     private bool _movingWindowSnapResizeGesture;
+    private bool _movingWindowStartedByForegroundFallback;
+    private bool _isWorkbenchPanelDragging;
+    private WpfPoint _workbenchPanelDragStartPoint;
+    private double _workbenchPanelDragStartOffsetX;
+    private double _workbenchPanelDragStartOffsetY;
 
     private MainViewModel ViewModel => (MainViewModel)DataContext;
 
@@ -97,13 +125,19 @@ public partial class MainWindow : Window
         {
             Interval = TimeSpan.FromSeconds(5)
         };
+        _snapAssistFallbackTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(50)
+        };
 
         _snapAssistTimer.Tick += SnapAssistTimer_Tick;
         _snapAssistHealthTimer.Tick += SnapAssistHealthTimer_Tick;
+        _snapAssistFallbackTimer.Tick += SnapAssistFallbackTimer_Tick;
         EditorCanvas.NodeSelected += EditorCanvas_NodeSelected;
         EditorCanvas.SplitterRatioChanged += EditorCanvas_SplitterRatioChanged;
         EditorCanvas.CanvasContextActionRequested += EditorCanvas_CanvasContextActionRequested;
         EditorCanvas.SnapLayoutSwitchRequested += EditorCanvas_SnapLayoutSwitchRequested;
+        EditorCanvas.WorkspaceProfileSwitchRequested += EditorCanvas_WorkspaceProfileSwitchRequested;
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
         StateChanged += MainWindow_StateChanged;
@@ -128,6 +162,23 @@ public partial class MainWindow : Window
             .ToList();
     }
 
+    public IReadOnlyList<LayoutListItemViewModel> GetTrayWorkspaceProfileItems()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            return Dispatcher.Invoke(GetTrayWorkspaceProfileItems);
+        }
+
+        return ViewModel.WorkspaceProfiles
+            .Select(item => new LayoutListItemViewModel
+            {
+                Id = item.Id,
+                Name = item.Name,
+                Description = item.Description
+            })
+            .ToList();
+    }
+
     public string GetActiveSnapLayoutId()
     {
         if (!Dispatcher.CheckAccess())
@@ -136,6 +187,16 @@ public partial class MainWindow : Window
         }
 
         return ViewModel.ActiveSnapLayoutId;
+    }
+
+    public string GetActiveWorkspaceProfileId()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            return Dispatcher.Invoke(GetActiveWorkspaceProfileId);
+        }
+
+        return ViewModel.ActiveWorkspaceProfileId;
     }
 
     public void SwitchSnapLayoutFromTray(string layoutId)
@@ -149,6 +210,17 @@ public partial class MainWindow : Window
         SwitchSnapLayoutAndResetRuntimeState(layoutId);
     }
 
+    public void SwitchWorkspaceProfileFromTray(string profileId)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => SwitchWorkspaceProfileFromTray(profileId));
+            return;
+        }
+
+        SwitchWorkspaceProfileAndResetRuntimeState(profileId, notifyOnSuccess: false);
+    }
+
     public void PrepareForTrayRestore()
     {
         if (!Dispatcher.CheckAccess())
@@ -159,6 +231,7 @@ public partial class MainWindow : Window
 
         PaneWorksLog.Info("Prepare main window restore from tray");
         EnsureSnapOverlayHidden();
+        RestoreWorkbenchFromSidebar();
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -195,6 +268,11 @@ public partial class MainWindow : Window
         SwitchSnapLayoutAndResetRuntimeState(e.LayoutId);
     }
 
+    private void EditorCanvas_WorkspaceProfileSwitchRequested(object? sender, WorkspaceProfileSwitchRequestedEventArgs e)
+    {
+        SwitchWorkspaceProfileAndResetRuntimeState(e.ProfileId, notifyOnSuccess: false);
+    }
+
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
         var app = (App)WpfApplication.Current;
@@ -226,8 +304,8 @@ public partial class MainWindow : Window
         if (!IsTextInputFocused() && MatchesMinimizeShortcut(e))
         {
             e.Handled = true;
-            PaneWorksLog.Info("Minimize shortcut pressed");
-            ((App)WpfApplication.Current).MinimizeMainWindowToTray();
+            PaneWorksLog.Info("Tray shortcut pressed");
+            MinimizeWorkbenchToTray();
             return;
         }
 
@@ -241,19 +319,31 @@ public partial class MainWindow : Window
     {
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.S)
         {
-            ViewModel.SaveLayoutCommand.Execute(null);
+            if (ViewModel.SaveLayoutCommand.CanExecute(null))
+            {
+                ViewModel.SaveLayoutCommand.Execute(null);
+            }
+
             return true;
         }
 
         if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.S)
         {
-            ViewModel.SaveAsLayoutCommand.Execute(null);
+            if (ViewModel.SaveAsLayoutCommand.CanExecute(null))
+            {
+                ViewModel.SaveAsLayoutCommand.Execute(null);
+            }
+
             return true;
         }
 
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.N)
         {
-            ViewModel.NewLayoutCommand.Execute(null);
+            if (ViewModel.NewLayoutCommand.CanExecute(null))
+            {
+                ViewModel.NewLayoutCommand.Execute(null);
+            }
+
             return true;
         }
 
@@ -289,7 +379,11 @@ public partial class MainWindow : Window
 
         if (!IsTextInputFocused() && Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Delete)
         {
-            ViewModel.DeleteSelectedSplitCommand.Execute(null);
+            if (ViewModel.DeleteSelectedSplitCommand.CanExecute(null))
+            {
+                ViewModel.DeleteSelectedSplitCommand.Execute(null);
+            }
+
             return true;
         }
 
@@ -311,9 +405,6 @@ public partial class MainWindow : Window
         EnsureSnapAssistStarted();
         _snapAssistHealthTimer.Start();
         PaneWorksLog.Info("Main window loaded");
-        Dispatcher.BeginInvoke(
-            () => RestoreBoundWindowsForActiveLayout(clearRuntimeState: false, notifyOnResult: false, reason: "startup"),
-            DispatcherPriority.Background);
     }
 
     private void MainWindow_StateChanged(object? sender, EventArgs e)
@@ -340,12 +431,14 @@ public partial class MainWindow : Window
         UpdateEditorStageBounds();
         UpdateWorkbenchPanelPosition();
         _snapAssistHealthTimer.Start();
+        _snapAssistFallbackTimer.Start();
     }
 
     private void DisarmSnapAssist(bool restoreWindow)
     {
         _isSnapAssistArmed = false;
         _snapAssistHealthTimer.Stop();
+        _snapAssistFallbackTimer.Stop();
         _windowMoveMonitor.Stop();
         PaneWorksLog.Info("Snap assist stopped");
         StopManualDetachedDragLoop();
@@ -369,7 +462,7 @@ public partial class MainWindow : Window
         _movingWindowDetachedFromSnapGroup = false;
         _movingWindowDetachCandidate = false;
         _movingWindowSnapResizeGesture = false;
-        ViewModel.ResetSnapLayoutPreview();
+        _movingWindowStartedByForegroundFallback = false;
         EnsureSnapOverlayHidden();
 
         if (restoreWindow)
@@ -387,6 +480,82 @@ public partial class MainWindow : Window
             PaneWorksLog.Info("Snap assist hook restarted by health timer");
             _windowMoveMonitor.Start();
         }
+    }
+
+    private void SnapAssistFallbackTimer_Tick(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (!_isSnapAssistArmed
+                || _movingWindowHandle != IntPtr.Zero
+                || IsInternalWindowLayoutUpdateActive()
+                || GetActiveSnapAssistMode() == SnapAssistMode.None
+                || !IsPrimaryMouseButtonPressed())
+            {
+                return;
+            }
+
+            if (!TryGetForegroundSnapCandidate(out var foregroundWindowHandle))
+            {
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (_lastMoveStartEventHandle == foregroundWindowHandle
+                && now - _lastMoveStartEventAt < TimeSpan.FromMilliseconds(250))
+            {
+                return;
+            }
+
+            _lastMoveStartEventHandle = foregroundWindowHandle;
+            _lastMoveStartEventAt = now;
+            BeginTrackingExternalWindowMove(foregroundWindowHandle, now, startedByForegroundFallback: true);
+        }
+        catch (Exception exception)
+        {
+            PaneWorksLog.Error("Snap assist foreground fallback failed", exception);
+            ResetMovingWindowState();
+            EnsureSnapOverlayHidden();
+        }
+    }
+
+    private bool TryGetForegroundSnapCandidate(out IntPtr windowHandle)
+    {
+        windowHandle = GetForegroundWindow();
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        windowHandle = GetAncestor(windowHandle, GetAncestorRoot);
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        GetWindowThreadProcessId(windowHandle, out var processId);
+        if (processId == Environment.ProcessId)
+        {
+            return false;
+        }
+
+        if (!_workspaceApplyService.TryGetVisibleWindowBounds(windowHandle, out var bounds))
+        {
+            return false;
+        }
+
+        return bounds.Width >= 80 && bounds.Height >= 40;
+    }
+
+    private bool HasForegroundFallbackWindowMoved()
+    {
+        if (!_movingWindowStartedByForegroundFallback || _movingWindowInitialBounds is null)
+        {
+            return true;
+        }
+
+        return _workspaceApplyService.TryGetVisibleWindowBounds(_movingWindowHandle, out var currentBounds)
+            && !AreBoundsClose(currentBounds, _movingWindowInitialBounds.Value, WindowBoundsTolerance);
     }
 
     private void WindowMoveMonitor_MoveStarted(object? sender, WindowMoveStateChangedEventArgs e)
@@ -430,46 +599,53 @@ public partial class MainWindow : Window
                     ResetMovingWindowState();
                 }
 
-                _movingWindowHandle = e.WindowHandle;
-                _movingWindowStartedAt = now;
-                PaneWorksLog.Info($"Move started: 0x{_movingWindowHandle.ToInt64():X}");
-                _hoveredSnapRegion = null;
-                _hoveredSnapDisplayId = null;
-                _movingWindowInitialBounds = _workspaceApplyService.TryGetVisibleWindowBounds(_movingWindowHandle, out var initialBounds)
-                    ? initialBounds
-                    : null;
-                CaptureMovingWindowDragAnchor(_movingWindowInitialBounds);
-                _movingWindowWasSnapped = _snapBindings.ContainsKey(_movingWindowHandle);
-                _movingWindowDetachedFromSnapGroup = false;
-                _movingWindowSnapResizeGesture = _movingWindowWasSnapped && IsResizeGesture(_movingWindowInitialBounds);
-                _movingWindowDetachCandidate = _movingWindowWasSnapped && !_movingWindowSnapResizeGesture;
-                ViewModel.ResetSnapLayoutPreview();
-
-                if (_movingWindowDetachCandidate)
-                {
-                    DetachMovingWindowFromSnapGroup();
-                }
-
-                if (_movingWindowSnapResizeGesture)
-                {
-                    if (EnableRuntimeLinkedResize)
-                    {
-                        StartRuntimeLinkedResizeLoop(_movingWindowHandle);
-                    }
-                }
-                else
-                {
-                    _snapAssistTimer.Start();
-                }
+                BeginTrackingExternalWindowMove(e.WindowHandle, now, startedByForegroundFallback: false);
             }
             catch (Exception exception)
             {
                 PaneWorksLog.Error("Move started handler failed", exception);
                 ResetMovingWindowState();
-                ViewModel.ResetSnapLayoutPreview();
                 EnsureSnapOverlayHidden();
             }
         });
+    }
+
+    private void BeginTrackingExternalWindowMove(
+        IntPtr windowHandle,
+        DateTimeOffset startedAt,
+        bool startedByForegroundFallback)
+    {
+        _movingWindowHandle = windowHandle;
+        _movingWindowStartedAt = startedAt;
+        _movingWindowStartedByForegroundFallback = startedByForegroundFallback;
+        PaneWorksLog.Info($"{(startedByForegroundFallback ? "Foreground fallback move started" : "Move started")}: 0x{_movingWindowHandle.ToInt64():X}");
+        _hoveredSnapRegion = null;
+        _hoveredSnapDisplayId = null;
+        _movingWindowInitialBounds = _workspaceApplyService.TryGetVisibleWindowBounds(_movingWindowHandle, out var initialBounds)
+            ? initialBounds
+            : null;
+        CaptureMovingWindowDragAnchor(_movingWindowInitialBounds);
+        _movingWindowWasSnapped = _snapBindings.ContainsKey(_movingWindowHandle);
+        _movingWindowDetachedFromSnapGroup = false;
+        _movingWindowSnapResizeGesture = _movingWindowWasSnapped && IsResizeGesture(_movingWindowInitialBounds);
+        _movingWindowDetachCandidate = _movingWindowWasSnapped && !_movingWindowSnapResizeGesture;
+
+        if (_movingWindowDetachCandidate)
+        {
+            DetachMovingWindowFromSnapGroup();
+        }
+
+        if (_movingWindowSnapResizeGesture)
+        {
+            if (EnableRuntimeLinkedResize)
+            {
+                StartRuntimeLinkedResizeLoop(_movingWindowHandle);
+            }
+        }
+        else
+        {
+            _snapAssistTimer.Start();
+        }
     }
 
     private void WindowMoveMonitor_MoveEnded(object? sender, WindowMoveStateChangedEventArgs e)
@@ -504,51 +680,66 @@ public partial class MainWindow : Window
                 }
 
                 _snapAssistTimer.Stop();
-
-                if (_movingWindowDetachedFromSnapGroup)
-                {
-                    RestoreDetachedWindowAfterMove();
-                }
-                else if (_hoveredSnapRegion is not null && !string.IsNullOrWhiteSpace(_hoveredSnapDisplayId))
-                {
-                    var restoreBounds = ResolveRestoreBoundsForSnap(_movingWindowHandle);
-                    PaneWorksLog.Info($"Snap window: 0x{_movingWindowHandle.ToInt64():X}, restore={restoreBounds.Width:0}x{restoreBounds.Height:0}");
-                    _snapBindings[_movingWindowHandle] = new SnapBindingState(_hoveredSnapRegion.NodeId, _hoveredSnapDisplayId, restoreBounds);
-                    _snapRuntimeBounds[_movingWindowHandle] = _hoveredSnapRegion.Bounds;
-                    _workspaceApplyService.SnapWindowToBounds(_movingWindowHandle, _hoveredSnapRegion.Bounds);
-                }
-                else if (_movingWindowSnapResizeGesture)
-                {
-                    PaneWorksLog.Info($"Finalize snapped runtime resize without linked session: 0x{_movingWindowHandle.ToInt64():X}");
-                    CaptureCurrentRuntimeBoundsForDisplay(null);
-                }
-                else if (!_movingWindowDetachedFromSnapGroup && _snapBindings.ContainsKey(_movingWindowHandle))
-                {
-                    PaneWorksLog.Info($"Finalize snapped resize: 0x{_movingWindowHandle.ToInt64():X}");
-                    if (TryUpdateSnapLayoutFromWindowBounds(_movingWindowHandle, persist: true))
-                    {
-                        PaneWorksLog.Info($"Apply snapped resize bindings: 0x{_movingWindowHandle.ToInt64():X}");
-                        ReapplySnapBindings();
-                    }
-                    else
-                    {
-                        PaneWorksLog.Info($"Reapply snapped bindings without layout change: 0x{_movingWindowHandle.ToInt64():X}");
-                        ReapplySnapBindings();
-                    }
-                }
+                FinalizeMovingWindowAfterRelease("system");
 
                 ResetMovingWindowState();
-                ViewModel.ResetSnapLayoutPreview();
                 EnsureSnapOverlayHidden();
             }
             catch (Exception exception)
             {
                 PaneWorksLog.Error("Move ended handler failed", exception);
                 ResetMovingWindowState();
-                ViewModel.ResetSnapLayoutPreview();
                 EnsureSnapOverlayHidden();
             }
         });
+    }
+
+    private void FinalizeMovingWindowAfterRelease(string reason)
+    {
+        if (_movingWindowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (_movingWindowDetachedFromSnapGroup)
+        {
+            RestoreDetachedWindowAfterMove();
+        }
+        else if (_hoveredSnapRegion is not null && !string.IsNullOrWhiteSpace(_hoveredSnapDisplayId))
+        {
+            var restoreBounds = ResolveRestoreBoundsForSnap(_movingWindowHandle);
+            PaneWorksLog.Info($"Snap window ({reason}): 0x{_movingWindowHandle.ToInt64():X}, restore={restoreBounds.Width:0}x{restoreBounds.Height:0}");
+            _snapBindings[_movingWindowHandle] = new SnapBindingState(_hoveredSnapRegion.NodeId, _hoveredSnapDisplayId, restoreBounds);
+            _snapRuntimeBounds[_movingWindowHandle] = _hoveredSnapRegion.Bounds;
+            TrySnapWindowToBoundsWithStatus(_movingWindowHandle, _hoveredSnapRegion.Bounds, reason);
+            QueueSnappedWindowInfoCache(_movingWindowHandle);
+        }
+        else if (_movingWindowSnapResizeGesture)
+        {
+            PaneWorksLog.Info($"Finalize snapped runtime resize without linked session ({reason}): 0x{_movingWindowHandle.ToInt64():X}");
+            CaptureCurrentRuntimeBoundsForDisplay(null);
+            TryUpdateSessionSnapLayoutFromWindowBounds(_movingWindowHandle);
+        }
+        else if (!_movingWindowDetachedFromSnapGroup && _snapBindings.ContainsKey(_movingWindowHandle))
+        {
+            PaneWorksLog.Info($"Finalize snapped resize into session layout ({reason}): 0x{_movingWindowHandle.ToInt64():X}");
+            CaptureCurrentRuntimeBoundsForDisplay(null);
+            TryUpdateSessionSnapLayoutFromWindowBounds(_movingWindowHandle);
+        }
+    }
+
+    private bool TrySnapWindowToBoundsWithStatus(IntPtr windowHandle, PaneRect bounds, string reason)
+    {
+        if (_workspaceApplyService.TrySnapWindowToBounds(windowHandle, bounds, out var errorCode))
+        {
+            return true;
+        }
+
+        PaneWorksLog.Info($"Snap window failed ({reason}): 0x{windowHandle.ToInt64():X}, error={errorCode}");
+        ViewModel.SetUserStatusMessage(errorCode == Win32ErrorAccessDenied
+            ? "这个窗口权限高于 PaneWorks。请用管理员身份启动 PaneWorks 后再吸附任务管理器或管理员软件。"
+            : $"窗口吸附被系统拒绝，错误码：{errorCode}");
+        return false;
     }
 
     private void SnapAssistTimer_Tick(object? sender, EventArgs e)
@@ -589,7 +780,16 @@ public partial class MainWindow : Window
                 return;
             }
 
-                if (!IsSnapModifierPressed())
+            if (_movingWindowStartedByForegroundFallback && !HasForegroundFallbackWindowMoved())
+            {
+                _hoveredSnapRegion = null;
+                _hoveredSnapDisplayId = null;
+                EnsureSnapOverlayHidden();
+                return;
+            }
+
+                var snapAssistMode = GetActiveSnapAssistMode();
+                if (snapAssistMode == SnapAssistMode.None)
                 {
                     if (!_movingWindowDetachedFromSnapGroup && _snapBindings.ContainsKey(_movingWindowHandle))
                     {
@@ -604,14 +804,13 @@ public partial class MainWindow : Window
                 return;
             }
         }
-        catch (Exception exception)
-        {
-            PaneWorksLog.Error("Snap assist timer failed", exception);
-            ResetMovingWindowState();
-            ViewModel.ResetSnapLayoutPreview();
-            EnsureSnapOverlayHidden();
-            return;
-        }
+            catch (Exception exception)
+            {
+                PaneWorksLog.Error("Snap assist timer failed", exception);
+                ResetMovingWindowState();
+                EnsureSnapOverlayHidden();
+                return;
+            }
 
         try
         {
@@ -621,7 +820,16 @@ public partial class MainWindow : Window
             }
 
             var activeDisplay = _displayDiscoveryService.GetDisplayFromPoint((int)cursorInDevicePixels.X, (int)cursorInDevicePixels.Y);
-            var snapDocument = ViewModel.GetSnapLayoutDocumentForDisplay(activeDisplay.Id);
+            var snapAssistMode = GetActiveSnapAssistMode();
+            if (snapAssistMode == SnapAssistMode.None)
+            {
+                _hoveredSnapRegion = null;
+                _hoveredSnapDisplayId = null;
+                EnsureSnapOverlayHidden();
+                return;
+            }
+
+            var snapDocument = GetSnapAssistLayoutDocumentForDisplay(activeDisplay.Id, snapAssistMode);
             var targetStageBounds = GetSnapTargetStageBounds(activeDisplay);
             var targetGeometry = _geometryCalculator.Compute(
                 snapDocument,
@@ -631,18 +839,17 @@ public partial class MainWindow : Window
             _hoveredSnapRegion = targetGeometry.Regions.FirstOrDefault(region => Contains(region.Bounds, cursorInDevicePixels));
             _hoveredSnapDisplayId = activeDisplay.Id;
 
-            EnsureSnapOverlaysVisible(activeDisplay.Id, _hoveredSnapRegion?.NodeId);
+            EnsureSnapOverlaysVisible(activeDisplay.Id, _hoveredSnapRegion?.NodeId, snapAssistMode);
         }
         catch (Exception exception)
         {
             PaneWorksLog.Error("Snap assist preview failed", exception);
             ResetMovingWindowState();
-            ViewModel.ResetSnapLayoutPreview();
             EnsureSnapOverlayHidden();
         }
     }
 
-    private void EnsureSnapOverlaysVisible(string activeDisplayId, string? activePreviewNodeId)
+    private void EnsureSnapOverlaysVisible(string activeDisplayId, string? activePreviewNodeId, SnapAssistMode snapAssistMode)
     {
         var liveDisplayIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -657,7 +864,7 @@ public partial class MainWindow : Window
             }
 
             var displayDipBounds = DeviceRectToDipRect(display.Bounds);
-            overlayWindow.Document = ViewModel.GetSnapLayoutDocumentForDisplay(display.Id);
+            overlayWindow.Document = GetSnapAssistLayoutDocumentForDisplay(display.Id, snapAssistMode);
             overlayWindow.PreviewNodeId = string.Equals(display.Id, activeDisplayId, StringComparison.OrdinalIgnoreCase)
                 ? activePreviewNodeId
                 : null;
@@ -777,6 +984,92 @@ public partial class MainWindow : Window
         WorkbenchPanel.Margin = new Thickness(left, top, 0, 0);
     }
 
+    private void WorkbenchDragHandle_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _isWorkbenchPanelDragging = true;
+        _workbenchPanelDragStartPoint = e.GetPosition(this);
+        _workbenchPanelDragStartOffsetX = WorkbenchPanelTranslate.X;
+        _workbenchPanelDragStartOffsetY = WorkbenchPanelTranslate.Y;
+
+        if (sender is UIElement element)
+        {
+            element.CaptureMouse();
+        }
+
+        e.Handled = true;
+    }
+
+    private void WorkbenchDragHandle_MouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (!_isWorkbenchPanelDragging)
+        {
+            return;
+        }
+
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            EndWorkbenchPanelDrag(sender);
+            return;
+        }
+
+        var currentPoint = e.GetPosition(this);
+        SetWorkbenchPanelDragOffset(
+            _workbenchPanelDragStartOffsetX + currentPoint.X - _workbenchPanelDragStartPoint.X,
+            _workbenchPanelDragStartOffsetY + currentPoint.Y - _workbenchPanelDragStartPoint.Y);
+        e.Handled = true;
+    }
+
+    private void WorkbenchDragHandle_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        EndWorkbenchPanelDrag(sender);
+        e.Handled = true;
+    }
+
+    private void EndWorkbenchPanelDrag(object? sender)
+    {
+        if (!_isWorkbenchPanelDragging)
+        {
+            return;
+        }
+
+        _isWorkbenchPanelDragging = false;
+        if (sender is UIElement { IsMouseCaptured: true } element)
+        {
+            element.ReleaseMouseCapture();
+        }
+    }
+
+    private void SetWorkbenchPanelDragOffset(double offsetX, double offsetY)
+    {
+        var panelWidth = WorkbenchPanel.ActualWidth > 0
+            ? WorkbenchPanel.ActualWidth
+            : WorkbenchPanel.DesiredSize.Width;
+        var panelHeight = WorkbenchPanel.ActualHeight > 0
+            ? WorkbenchPanel.ActualHeight
+            : WorkbenchPanel.DesiredSize.Height;
+
+        if (ActualWidth > 0 && panelWidth > 0)
+        {
+            var minOffsetX = 12 - WorkbenchPanel.Margin.Left;
+            var maxOffsetX = Math.Max(
+                minOffsetX,
+                ActualWidth - WorkbenchPanel.Margin.Left - panelWidth - 12);
+            offsetX = Math.Clamp(offsetX, minOffsetX, maxOffsetX);
+        }
+
+        if (ActualHeight > 0 && panelHeight > 0)
+        {
+            var minOffsetY = 12 - WorkbenchPanel.Margin.Top;
+            var maxOffsetY = Math.Max(
+                minOffsetY,
+                ActualHeight - WorkbenchPanel.Margin.Top - panelHeight - 12);
+            offsetY = Math.Clamp(offsetY, minOffsetY, maxOffsetY);
+        }
+
+        WorkbenchPanelTranslate.X = offsetX;
+        WorkbenchPanelTranslate.Y = offsetY;
+    }
+
     private static PaneRect GetSnapVisualStageBounds(PaneRect displayBounds)
     {
         return new PaneRect(
@@ -799,26 +1092,62 @@ public partial class MainWindow : Window
             && point.Y <= rect.Y + rect.Height;
     }
 
-    private bool IsSnapModifierPressed()
+    private SnapAssistMode GetActiveSnapAssistMode()
     {
-        return ShortcutGestureHelper.IsPressed(ViewModel.SnapModifierKey);
+        if (ShortcutGestureHelper.IsPressed(ViewModel.RuntimeSessionModifierKey))
+        {
+            return SnapAssistMode.RuntimeSession;
+        }
+
+        return ShortcutGestureHelper.IsPressed(ViewModel.SnapModifierKey)
+            ? SnapAssistMode.SavedLayout
+            : SnapAssistMode.None;
     }
 
-    private bool TryUpdateSnapLayoutFromWindowBounds(IntPtr windowHandle, bool persist)
+    private LayoutDocument GetSnapAssistLayoutDocumentForDisplay(string displayId, SnapAssistMode snapAssistMode)
     {
-        if (!TryResolveSnapResize(windowHandle, out var resizeCandidate, out var clampedRatio))
+        return snapAssistMode == SnapAssistMode.RuntimeSession
+            ? GetRuntimeSessionLayoutDocumentForDisplay(displayId)
+            : ViewModel.GetSnapLayoutDocumentForDisplay(displayId);
+    }
+
+    private LayoutDocument GetRuntimeSessionLayoutDocumentForDisplay(string displayId)
+    {
+        return _sessionSnapLayoutDocuments.TryGetValue(displayId, out var document)
+            ? document
+            : ViewModel.GetSnapLayoutDocumentForDisplay(displayId);
+    }
+
+    private bool TryUpdateSessionSnapLayoutFromWindowBounds(IntPtr windowHandle)
+    {
+        if (!TryResolveSnapResize(
+                windowHandle,
+                GetRuntimeSessionLayoutDocumentForDisplay,
+                out var resizeCandidate,
+                out var clampedRatio))
         {
             return false;
         }
 
-        return ViewModel.UpdateSnapLayoutSplitRatioForDisplay(
-            resizeCandidate.DisplayId,
+        var sourceDocument = GetRuntimeSessionLayoutDocumentForDisplay(resizeCandidate.DisplayId);
+        var result = _runtimeSessionLayoutEditorService.UpdateSplitRatio(
+            sourceDocument,
             resizeCandidate.Splitter.SplitNodeId,
-            clampedRatio,
-            persist);
+            clampedRatio);
+        if (!result.Changed)
+        {
+            return false;
+        }
+
+        _sessionSnapLayoutDocuments[resizeCandidate.DisplayId] = result.Document;
+        return true;
     }
 
-    private bool TryResolveSnapResize(IntPtr windowHandle, out ResizeCandidate resizeCandidate, out double clampedRatio)
+    private bool TryResolveSnapResize(
+        IntPtr windowHandle,
+        Func<string, LayoutDocument> layoutResolver,
+        out ResizeCandidate resizeCandidate,
+        out double clampedRatio)
     {
         resizeCandidate = new ResizeCandidate(
             string.Empty,
@@ -840,8 +1169,9 @@ public partial class MainWindow : Window
         }
 
         var stageBounds = GetSnapTargetStageBounds(display);
+        var layoutDocument = layoutResolver(binding.DisplayId);
         var geometry = _geometryCalculator.Compute(
-            ViewModel.GetSnapLayoutDocumentForDisplay(binding.DisplayId),
+            layoutDocument,
             stageBounds,
             SnapTargetSplitterThickness);
         var region = geometry.Regions.FirstOrDefault(item => item.NodeId == binding.NodeId);
@@ -853,7 +1183,7 @@ public partial class MainWindow : Window
         var splittersById = geometry.Splitters.ToDictionary(item => item.SplitNodeId, StringComparer.Ordinal);
         var matchedCandidate = FindResizeCandidate(
             binding.DisplayId,
-            ViewModel.GetSnapLayoutDocumentForDisplay(binding.DisplayId).Root,
+            layoutDocument.Root,
             binding.NodeId,
             region.Bounds,
             currentBounds,
@@ -915,6 +1245,7 @@ public partial class MainWindow : Window
         var hasBinding = _snapBindings.TryGetValue(_movingWindowHandle, out var binding);
         _snapBindings.Remove(_movingWindowHandle);
         _snapRuntimeBounds.Remove(_movingWindowHandle);
+        _snapWindowInfoCache.Remove(_movingWindowHandle);
         if (hasBinding)
         {
             PaneWorksLog.Info($"Detach snapped window and restore: 0x{_movingWindowHandle.ToInt64():X}");
@@ -1231,8 +1562,8 @@ public partial class MainWindow : Window
         _runtimeLinkedResizeSession = null;
 
         CaptureCurrentRuntimeBoundsForDisplay(session.DisplayId);
+        TryUpdateSessionSnapLayoutFromWindowBounds(session.SourceWindowHandle);
         ResetMovingWindowState();
-        ViewModel.ResetSnapLayoutPreview();
         EnsureSnapOverlayHidden();
     }
 
@@ -1567,7 +1898,6 @@ public partial class MainWindow : Window
         }
 
         ResetMovingWindowState();
-        ViewModel.ResetSnapLayoutPreview();
         EnsureSnapOverlayHidden();
     }
 
@@ -1586,19 +1916,18 @@ public partial class MainWindow : Window
 
         var now = DateTimeOffset.UtcNow;
         _movingWindowMouseReleasedAt ??= now;
-        if (now - _movingWindowMouseReleasedAt.Value < TimeSpan.FromMilliseconds(800))
+        var settleDelay = _movingWindowStartedByForegroundFallback
+            ? TimeSpan.FromMilliseconds(80)
+            : TimeSpan.FromMilliseconds(800);
+        if (now - _movingWindowMouseReleasedAt.Value < settleDelay)
         {
             return false;
         }
 
         PaneWorksLog.Info($"Recover stale move state: 0x{_movingWindowHandle.ToInt64():X}");
-        if (_movingWindowDetachedFromSnapGroup)
-        {
-            RestoreDetachedWindowAfterMove();
-        }
-
+        _snapAssistTimer.Stop();
+        FinalizeMovingWindowAfterRelease(_movingWindowStartedByForegroundFallback ? "foreground-fallback" : "stale");
         ResetMovingWindowState();
-        ViewModel.ResetSnapLayoutPreview();
         EnsureSnapOverlayHidden();
         return true;
     }
@@ -1765,6 +2094,7 @@ public partial class MainWindow : Window
         _movingWindowDetachedFromSnapGroup = false;
         _movingWindowDetachCandidate = false;
         _movingWindowSnapResizeGesture = false;
+        _movingWindowStartedByForegroundFallback = false;
     }
 
     private bool IsResizeGesture(PaneRect? initialBounds)
@@ -1959,6 +2289,7 @@ public partial class MainWindow : Window
             {
                 _snapBindings.Remove(handle);
                 _snapRuntimeBounds.Remove(handle);
+                _snapWindowInfoCache.Remove(handle);
             }
         }
 
@@ -2165,8 +2496,18 @@ public partial class MainWindow : Window
     {
         ViewModel.SwitchSnapLayout(layoutId, notifyOnSuccess: false);
         ResetSnapRuntimeStateAfterLayoutSwitch();
+    }
+
+    private void SwitchWorkspaceProfileAndResetRuntimeState(string profileId, bool notifyOnSuccess)
+    {
+        if (!ViewModel.TrySwitchWorkspaceProfile(profileId, notifyOnSuccess))
+        {
+            return;
+        }
+
+        ResetSnapRuntimeStateAfterLayoutSwitch();
         Dispatcher.BeginInvoke(
-            () => RestoreBoundWindowsForActiveLayout(clearRuntimeState: false, notifyOnResult: false, reason: "layout-switch"),
+            () => RestoreBoundWindowsForActiveWorkspaceProfile(clearRuntimeState: false, notifyOnResult: notifyOnSuccess, reason: "workspace-profile-switch"),
             DispatcherPriority.Background);
     }
 
@@ -2177,6 +2518,8 @@ public partial class MainWindow : Window
         _snapAssistTimer.Stop();
         _snapBindings.Clear();
         _snapRuntimeBounds.Clear();
+        _snapWindowInfoCache.Clear();
+        _sessionSnapLayoutDocuments.Clear();
         _movingWindowHandle = IntPtr.Zero;
         _hoveredSnapRegion = null;
         _hoveredSnapDisplayId = null;
@@ -2194,7 +2537,6 @@ public partial class MainWindow : Window
         _movingWindowWasSnapped = false;
         _movingWindowDetachedFromSnapGroup = false;
         _movingWindowSnapResizeGesture = false;
-        ViewModel.ResetSnapLayoutPreview();
         EnsureSnapOverlayHidden();
     }
 
@@ -2225,9 +2567,69 @@ public partial class MainWindow : Window
         ViewModel.OpenSettings();
     }
 
+    private void CloseWorkbenchButton_Click(object sender, RoutedEventArgs e)
+    {
+        MinimizeWorkbenchToTray();
+    }
+
+    private void MinimizeWorkbenchButton_Click(object sender, RoutedEventArgs e)
+    {
+        MinimizeWorkbenchToTaskbar();
+    }
+
+    private void SidebarWorkbenchButton_Click(object sender, RoutedEventArgs e)
+    {
+        MinimizeWorkbenchToSidebar();
+    }
+
+    private void RestoreWorkbenchButton_Click(object sender, RoutedEventArgs e)
+    {
+        RestoreWorkbenchFromSidebar();
+    }
+
+    private void MinimizeWorkbenchToSidebar()
+    {
+        EndWorkbenchPanelDrag(null);
+        WorkbenchPanel.Visibility = Visibility.Collapsed;
+        WorkbenchMiniBar.Visibility = Visibility.Visible;
+        PaneWorksLog.Info("Workbench minimized to sidebar");
+    }
+
+    private void MinimizeWorkbenchToTaskbar()
+    {
+        EndWorkbenchPanelDrag(null);
+        ShowInTaskbar = true;
+        WindowState = WindowState.Minimized;
+        PaneWorksLog.Info("Workbench minimized to taskbar");
+    }
+
+    private void MinimizeWorkbenchToTray()
+    {
+        EndWorkbenchPanelDrag(null);
+        ((App)WpfApplication.Current).MinimizeMainWindowToTray();
+    }
+
+    private void RestoreWorkbenchFromSidebar()
+    {
+        WorkbenchMiniBar.Visibility = Visibility.Collapsed;
+        WorkbenchPanel.Visibility = Visibility.Visible;
+        PaneWorksLog.Info("Workbench restored from sidebar");
+    }
+
     private void BindWindowButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!ViewModel.TryGetSelectedLeafRegion(out _, out var nodeId))
+        if (!ViewModel.CanEditWorkspaceBindings)
+        {
+            WpfMessageBox.Show(
+                this,
+                "请先选中工作区方案并点击“编辑绑定”，再给区域绑定窗口。",
+                "PaneWorks",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        if (!ViewModel.TryGetSelectedLeafRegion(out var displayId, out var nodeId))
         {
             WpfMessageBox.Show(
                 this,
@@ -2258,6 +2660,7 @@ public partial class MainWindow : Window
         var dialog = new WindowBindingPickerDialog(
             windows,
             $"当前区域：{nodeId}  |  当前屏幕：{ViewModel.CurrentDisplayName}");
+        dialog.PreferredWindowHandle = FindSnappedWindowHandleForRegion(displayId, nodeId);
         dialog.Owner = this;
         dialog.Topmost = Topmost;
 
@@ -2269,6 +2672,8 @@ public partial class MainWindow : Window
         if (!ViewModel.TrySetSelectedRegionWindowBinding(
                 dialog.SelectedWindow.ProcessName,
                 dialog.SelectedWindow.Title,
+                dialog.SelectedWindow.ExecutablePath,
+                dialog.SelectedWindow.ExplorerFolderPath,
                 out var message))
         {
             WpfMessageBox.Show(
@@ -2282,54 +2687,412 @@ public partial class MainWindow : Window
 
         WpfMessageBox.Show(
             this,
-            $"{message} 切换到这套吸附布局或点击“恢复绑定窗口”后即可测试自动恢复。",
+            $"{message} 点击“应用选中工作区”即可测试重新吸附，切换工作区时也会自动应用。",
             "PaneWorks",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
     }
 
-    private void RestoreBoundWindowsButton_Click(object sender, RoutedEventArgs e)
+    private async void AutoBindSnappedWindowsButton_Click(object sender, RoutedEventArgs e)
     {
-        RestoreBoundWindowsForActiveLayout(clearRuntimeState: false, notifyOnResult: true, reason: "manual");
+        if (!ViewModel.CanEditWorkspaceBindings)
+        {
+            ViewModel.SetUserStatusMessage("请先选中工作区方案并点击“编辑绑定”，再一键绑定已吸附窗口。");
+            return;
+        }
+
+        if (!TryCaptureSnappedWorkspaceWindowBindingRequests(out var requests, out var buildMessage))
+        {
+            ViewModel.SetUserStatusMessage(buildMessage);
+            return;
+        }
+
+        var button = sender as System.Windows.Controls.Button;
+        if (button is not null)
+        {
+            button.IsEnabled = false;
+        }
+
+        try
+        {
+            PaneWorksLog.Info($"Auto workspace bind started: requests={requests.Count}");
+            var excludedWindowHandle = new WindowInteropHelper(this).Handle;
+            var bindings = await Task.Run(() => BuildSnappedWorkspaceWindowBindings(requests, excludedWindowHandle));
+            PaneWorksLog.Info($"Auto workspace bind built: bindings={bindings.Count}");
+
+            if (bindings.Count == 0)
+            {
+                ViewModel.SetUserStatusMessage("没有找到可写入工作区的已吸附窗口。");
+                return;
+            }
+
+            if (!ViewModel.TryUpsertWorkspaceWindowBindingsFast(bindings, out var message))
+            {
+                ViewModel.SetUserStatusMessage(message);
+                return;
+            }
+
+            PaneWorksLog.Info($"Auto workspace bind saved: bindings={bindings.Count}");
+            QueueExplorerFolderBindingCompletion(requests);
+        }
+        catch (Exception exception)
+        {
+            PaneWorksLog.Error("Auto workspace bind failed", exception);
+            ViewModel.SetUserStatusMessage($"一键绑定失败：{exception.Message}");
+        }
+        finally
+        {
+            if (button is not null)
+            {
+                button.IsEnabled = true;
+            }
+        }
+    }
+
+    private void QueueSnappedWindowInfoCache(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero || _snapWindowInfoCache.ContainsKey(windowHandle))
+        {
+            return;
+        }
+
+        var excludedWindowHandle = new WindowInteropHelper(this).Handle;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                return _workspaceApplyService.TryGetVisibleWindowInfo(
+                    windowHandle,
+                    excludedWindowHandle,
+                    includeExplorerFolderPath: false,
+                    out var windowInfo)
+                    ? windowInfo
+                    : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }).ContinueWith(task =>
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (task.Result is null || !_snapBindings.ContainsKey(windowHandle))
+                {
+                    return;
+                }
+
+                _snapWindowInfoCache[windowHandle] = task.Result;
+            });
+        }, TaskScheduler.Default);
+    }
+
+    private bool TryCaptureSnappedWorkspaceWindowBindingRequests(
+        out List<SnappedWorkspaceWindowBindingRequest> requests,
+        out string message)
+    {
+        requests = new List<SnappedWorkspaceWindowBindingRequest>();
+        message = string.Empty;
+
+        if (_snapBindings.Count == 0)
+        {
+            message = "当前还没有已吸附窗口。请先把窗口吸附到分区区域后再一键绑定。";
+            return false;
+        }
+
+        foreach (var item in _snapBindings.ToList())
+        {
+            if (!_snapWindowInfoCache.TryGetValue(item.Key, out var windowInfo))
+            {
+                QueueSnappedWindowInfoCache(item.Key);
+                continue;
+            }
+
+            requests.Add(new SnappedWorkspaceWindowBindingRequest(item.Value.DisplayId, item.Value.NodeId, windowInfo, 0));
+        }
+
+        if (requests.Count == 0)
+        {
+            message = "没有找到已缓存的吸附窗口。请把窗口重新吸附一次，或先点“应用选中工作区”后再一键绑定。";
+            return false;
+        }
+
+        requests = AssignSnappedBindingRequestStackOrder(requests);
+        return true;
+    }
+
+    private List<WorkspaceWindowBinding> BuildSnappedWorkspaceWindowBindings(
+        IReadOnlyList<SnappedWorkspaceWindowBindingRequest> requests,
+        IntPtr excludedWindowHandle)
+    {
+        var bindings = new List<WorkspaceWindowBinding>();
+        foreach (var request in requests)
+        {
+            bindings.Add(CreateWorkspaceWindowBinding(request.DisplayId, request.NodeId, request.WindowInfo, request.StackOrder));
+        }
+
+        return bindings;
+    }
+
+    private static List<SnappedWorkspaceWindowBindingRequest> AssignSnappedBindingRequestStackOrder(
+        IReadOnlyList<SnappedWorkspaceWindowBindingRequest> requests)
+    {
+        if (requests.Count <= 1)
+        {
+            return requests.ToList();
+        }
+
+        var zOrderRanks = BuildDesktopZOrderRank();
+        var orderedRequests = new List<SnappedWorkspaceWindowBindingRequest>();
+        foreach (var group in requests.GroupBy(item => GetBindingKey(item.DisplayId, item.NodeId), StringComparer.OrdinalIgnoreCase))
+        {
+            var stackOrder = 0;
+            foreach (var request in group
+                .OrderByDescending(item => GetDesktopZOrderRank(item.WindowInfo.Handle, zOrderRanks))
+                .ThenBy(item => item.WindowInfo.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.WindowInfo.Title, StringComparer.OrdinalIgnoreCase))
+            {
+                orderedRequests.Add(request with { StackOrder = stackOrder });
+                stackOrder++;
+            }
+        }
+
+        return orderedRequests;
+    }
+
+    private static Dictionary<IntPtr, int> BuildDesktopZOrderRank()
+    {
+        var ranks = new Dictionary<IntPtr, int>();
+        var windowHandle = GetTopWindow(IntPtr.Zero);
+        var rank = 0;
+
+        while (windowHandle != IntPtr.Zero && rank < 20000)
+        {
+            if (!ranks.ContainsKey(windowHandle))
+            {
+                ranks[windowHandle] = rank;
+                rank++;
+            }
+
+            windowHandle = GetWindow(windowHandle, GetWindowNext);
+        }
+
+        return ranks;
+    }
+
+    private static int GetDesktopZOrderRank(
+        IntPtr windowHandle,
+        IReadOnlyDictionary<IntPtr, int> zOrderRanks)
+    {
+        return zOrderRanks.TryGetValue(windowHandle, out var rank)
+            ? rank
+            : int.MaxValue;
+    }
+
+    private void QueueExplorerFolderBindingCompletion(IReadOnlyList<SnappedWorkspaceWindowBindingRequest> requests)
+    {
+        foreach (var request in requests.Where(item => IsExplorerProcess(item.WindowInfo.ProcessName)))
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    return _workspaceApplyService.TryGetExplorerFolderPath(request.WindowInfo.Handle, out var folderPath)
+                        ? NormalizeFolderPath(folderPath)
+                        : string.Empty;
+                }
+                catch
+                {
+                    return string.Empty;
+                }
+            }).ContinueWith(task =>
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    var folderPath = task.Result;
+                    if (string.IsNullOrWhiteSpace(folderPath))
+                    {
+                        return;
+                    }
+
+                    var completedWindowInfo = request.WindowInfo with { ExplorerFolderPath = folderPath };
+                    var binding = CreateWorkspaceWindowBinding(request.DisplayId, request.NodeId, completedWindowInfo, request.StackOrder);
+                    if (ViewModel.TryUpsertWorkspaceWindowBindingPatch(
+                            binding,
+                            $"已补全 Explorer 文件夹绑定：{folderPath}"))
+                    {
+                        _snapWindowInfoCache[request.WindowInfo.Handle] = completedWindowInfo;
+                        PaneWorksLog.Info($"Explorer folder binding completed: {folderPath}");
+                    }
+                });
+            }, TaskScheduler.Default);
+        }
+    }
+
+    private static WorkspaceWindowBinding CreateWorkspaceWindowBinding(
+        string displayId,
+        string nodeId,
+        VisibleWindowInfo windowInfo,
+        int stackOrder = 0)
+    {
+        var explorerFolderPath = NormalizeFolderPath(windowInfo.ExplorerFolderPath);
+        var isExplorerFolder = IsExplorerProcess(windowInfo.ProcessName)
+            && !string.IsNullOrWhiteSpace(explorerFolderPath);
+
+        return new WorkspaceWindowBinding(
+            displayId,
+            nodeId,
+            windowInfo.ProcessName,
+            windowInfo.Title,
+            windowInfo.ExecutablePath,
+            string.Empty,
+            isExplorerFolder ? explorerFolderPath : TryGetWorkingDirectory(windowInfo.ExecutablePath),
+            isExplorerFolder ? "ExplorerFolder" : "Window",
+            isExplorerFolder ? "FolderPath" : "Auto",
+            isExplorerFolder ? explorerFolderPath : string.Empty,
+            Math.Max(0, stackOrder));
+    }
+
+    private bool TryGetSnapBindingTargetBounds(
+        SnapBindingState binding,
+        Dictionary<string, IReadOnlyDictionary<string, ComputedRegion>> geometryByDisplay,
+        out PaneRect bounds)
+    {
+        bounds = default;
+        if (!ViewModel.TryGetDisplayById(binding.DisplayId, out var display))
+        {
+            return false;
+        }
+
+        if (!geometryByDisplay.TryGetValue(display.Id, out var regionsById))
+        {
+            var geometry = _geometryCalculator.Compute(
+                ViewModel.GetSnapLayoutDocumentForDisplay(display.Id),
+                GetSnapTargetStageBounds(display),
+                SnapTargetSplitterThickness);
+            regionsById = geometry.Regions.ToDictionary(item => item.NodeId, StringComparer.Ordinal);
+            geometryByDisplay[display.Id] = regionsById;
+        }
+
+        if (!regionsById.TryGetValue(binding.NodeId, out var region))
+        {
+            return false;
+        }
+
+        bounds = region.Bounds;
+        return true;
+    }
+
+    private static string TryGetWorkingDirectory(string executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return Path.GetDirectoryName(executablePath) ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool IsExplorerProcess(string processName)
+    {
+        return string.Equals(processName, "explorer", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(processName, "explorer.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeFolderPath(string value)
+    {
+        var normalized = value.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            normalized = Path.GetFullPath(normalized);
+        }
+        catch
+        {
+        }
+
+        return TrimTrailingDirectorySeparators(normalized);
+    }
+
+    private static string TrimTrailingDirectorySeparators(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        if (!string.IsNullOrWhiteSpace(root)
+            && string.Equals(path, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.IsNullOrWhiteSpace(trimmed) ? path : trimmed;
     }
 
     private void ClearWindowBindingButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.TryClearSelectedRegionWindowBinding(out var message))
         {
-            WpfMessageBox.Show(
-                this,
-                message,
-                "PaneWorks",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            ViewModel.SetUserStatusMessage(message);
             return;
         }
 
-        WpfMessageBox.Show(
-            this,
-            message,
-            "PaneWorks",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+        ViewModel.SetUserStatusMessage(message);
     }
 
-    private void RestoreBoundWindowsForActiveLayout(bool clearRuntimeState, bool notifyOnResult, string reason)
+    private void ClearAllWindowBindingsButton_Click(object sender, RoutedEventArgs e)
     {
-        var bindings = ViewModel.GetActiveSnapWindowBindings();
+        if (!ViewModel.TryClearAllWorkspaceWindowBindingsFast(out var message))
+        {
+            ViewModel.SetUserStatusMessage(message);
+            return;
+        }
+
+        ViewModel.SetUserStatusMessage(message);
+    }
+
+    private async void RestoreBoundWindowsForActiveWorkspaceProfile(bool clearRuntimeState, bool notifyOnResult, string reason)
+    {
+        if (!ViewModel.IsWorkspaceProfileEnabled)
+        {
+            if (notifyOnResult)
+            {
+                WpfMessageBox.Show(
+                    this,
+                    "请先启用一套工作区方案，再恢复绑定窗口。",
+                    "PaneWorks",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return;
+        }
+
+        var bindings = ViewModel.GetActiveWorkspaceWindowBindings();
         if (bindings.Count == 0)
         {
             if (clearRuntimeState)
             {
                 _snapBindings.Clear();
                 _snapRuntimeBounds.Clear();
+                _snapWindowInfoCache.Clear();
+                _sessionSnapLayoutDocuments.Clear();
             }
 
             if (notifyOnResult)
             {
                 WpfMessageBox.Show(
                     this,
-                    "当前吸附布局还没有保存任何窗口绑定。",
+                    "当前工作区方案还没有保存任何窗口绑定。",
                     "PaneWorks",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -2338,48 +3101,23 @@ public partial class MainWindow : Window
             return;
         }
 
+        var excludedWindowHandle = new WindowInteropHelper(this).Handle;
         var visibleWindows = _workspaceApplyService
-            .GetVisibleWindows(new WindowInteropHelper(this).Handle)
+            .GetVisibleWindows(excludedWindowHandle)
             .ToList();
 
-        if (visibleWindows.Count == 0)
-        {
-            if (notifyOnResult)
-            {
-                WpfMessageBox.Show(
-                    this,
-                    "当前没有找到可恢复的桌面窗口。",
-                    "PaneWorks",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-            }
-
-            return;
-        }
-
         var matches = MatchWindowBindings(bindings, visibleWindows);
-        if (matches.Count == 0)
-        {
-            if (notifyOnResult)
-            {
-                WpfMessageBox.Show(
-                    this,
-                    "当前没有找到和已绑定规则匹配的窗口。",
-                    "PaneWorks",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-            }
-
-            return;
-        }
 
         if (clearRuntimeState)
         {
             _snapBindings.Clear();
             _snapRuntimeBounds.Clear();
+            _snapWindowInfoCache.Clear();
+            _sessionSnapLayoutDocuments.Clear();
         }
 
         var restoredCount = 0;
+        var restoredMatches = new List<MatchedWindowBinding>();
         var geometryByDisplay = new Dictionary<string, IReadOnlyDictionary<string, ComputedRegion>>(StringComparer.OrdinalIgnoreCase);
 
         BeginInternalWindowLayoutUpdate();
@@ -2392,16 +3130,16 @@ public partial class MainWindow : Window
                     continue;
                 }
 
-                RemoveRuntimeBindingForRegion(match.Binding.DisplayId, match.Binding.NodeId, match.Window.Handle);
-
                 var restoreBounds = ResolveRestoreBoundsForSnap(match.Window.Handle);
                 _snapBindings[match.Window.Handle] = new SnapBindingState(
                     match.Binding.NodeId,
                     match.Binding.DisplayId,
                     restoreBounds);
                 _snapRuntimeBounds[match.Window.Handle] = region.Bounds;
-                _workspaceApplyService.SnapWindowToBounds(match.Window.Handle, region.Bounds);
+                _snapWindowInfoCache[match.Window.Handle] = match.Window;
+                _ = TrySnapWindowToBoundsWithStatus(match.Window.Handle, region.Bounds, "workspace-restore");
                 restoredCount++;
+                restoredMatches.Add(match);
             }
         }
         finally
@@ -2409,15 +3147,48 @@ public partial class MainWindow : Window
             EndInternalWindowLayoutUpdate();
         }
 
-        PaneWorksLog.Info($"Window binding restore: reason={reason}, bindings={bindings.Count}, matched={matches.Count}, restored={restoredCount}");
+        RestoreWorkspaceWindowStackOrder(restoredMatches);
+
+        var matchedBindingKeys = matches
+            .Select(match => GetBindingInstanceKey(match.Binding))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingBindings = bindings
+            .Where(binding => !matchedBindingKeys.Contains(GetBindingInstanceKey(binding)))
+            .ToList();
+        var launchedCount = LaunchMissingWorkspaceWindows(missingBindings);
+        var launchedRestoredCount = 0;
+        if (launchedCount > 0)
+        {
+            ViewModel.SetUserStatusMessage($"已启动 {launchedCount} 个缺失窗口，正在等待窗口就绪并吸附...");
+            try
+            {
+                launchedRestoredCount = await RestoreLaunchedWorkspaceWindowsAsync(missingBindings, excludedWindowHandle);
+            }
+            catch (Exception exception)
+            {
+                PaneWorksLog.Error("Restore launched workspace windows failed", exception);
+            }
+        }
+
+        restoredCount += launchedRestoredCount;
+        RestoreRuntimeWorkspaceStackOrder(bindings);
+        ScheduleWorkspaceStackOrderStabilization(bindings, reason);
+        if (launchedRestoredCount > 0)
+        {
+            ViewModel.SetUserStatusMessage($"已等待并吸附 {launchedRestoredCount} 个刚启动的窗口。");
+        }
+
+        PaneWorksLog.Info($"Window binding restore: reason={reason}, bindings={bindings.Count}, matched={matches.Count}, launched={launchedCount}, restored={restoredCount}");
 
         if (notifyOnResult)
         {
             WpfMessageBox.Show(
                 this,
                 restoredCount > 0
-                    ? $"已按当前吸附布局恢复 {restoredCount} 个已绑定窗口。"
-                    : "这次没有成功恢复任何已绑定窗口。",
+                    ? launchedCount > 0
+                        ? $"已按当前工作区恢复 {restoredCount} 个窗口，其中启动了 {launchedCount} 个未打开窗口。"
+                        : $"已按当前工作区重新吸附 {restoredCount} 个已打开窗口。"
+                    : "这次没有找到可吸附或可启动的工作区窗口。",
                 "PaneWorks",
                 MessageBoxButton.OK,
                 restoredCount > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
@@ -2460,19 +3231,564 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private void RemoveRuntimeBindingForRegion(string displayId, string nodeId, IntPtr keepWindowHandle)
+    private int LaunchMissingWorkspaceWindows(IReadOnlyList<WorkspaceWindowBinding> bindings)
     {
-        foreach (var handle in _snapBindings
-                     .Where(item =>
-                         item.Key != keepWindowHandle
-                         && string.Equals(item.Value.DisplayId, displayId, StringComparison.OrdinalIgnoreCase)
-                         && string.Equals(item.Value.NodeId, nodeId, StringComparison.OrdinalIgnoreCase))
-                     .Select(item => item.Key)
-                     .ToList())
+        var launchedCount = 0;
+        foreach (var binding in bindings)
         {
-            _snapBindings.Remove(handle);
-            _snapRuntimeBounds.Remove(handle);
+            if (!TryCreateWorkspaceLaunchInfo(binding, out var startInfo))
+            {
+                continue;
+            }
+
+            try
+            {
+                PaneWorksLog.Info($"Launch workspace binding: {binding.ProcessName}, file={startInfo.FileName}, args={startInfo.Arguments}");
+                Process.Start(startInfo);
+                launchedCount++;
+            }
+            catch (Exception exception)
+            {
+                PaneWorksLog.Error($"Launch workspace binding failed: {binding.ProcessName}", exception);
+            }
         }
+
+        return launchedCount;
+    }
+
+    private async Task<int> RestoreLaunchedWorkspaceWindowsAsync(
+        IReadOnlyList<WorkspaceWindowBinding> bindings,
+        IntPtr excludedWindowHandle)
+    {
+        var watchBindings = bindings
+            .Where(CanLaunchWorkspaceBinding)
+            .ToList();
+        var restoredBindingKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var deadline = DateTimeOffset.UtcNow + WorkspaceLaunchRestoreTimeout;
+        var attempt = 0;
+        var includeExplorerFolderPath = watchBindings.Any(IsExplorerFolderBinding);
+
+        while (watchBindings.Count > 0 && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(attempt == 0
+                ? WorkspaceLaunchInitialRestoreDelay
+                : WorkspaceLaunchRestoreRetryInterval);
+            attempt++;
+
+            var bindingsToMatch = watchBindings
+                .Where(binding => !TryGetLiveRuntimeBindingHandle(binding, out _))
+                .ToList();
+            if (bindingsToMatch.Count == 0)
+            {
+                ScheduleLaunchedWorkspaceWindowHandoffWatch(
+                    watchBindings,
+                    excludedWindowHandle,
+                    includeExplorerFolderPath,
+                    deadline);
+                break;
+            }
+
+            var snappedHandles = _snapBindings.Keys.ToHashSet();
+            var visibleWindows = _workspaceApplyService
+                .GetVisibleWindows(excludedWindowHandle, includeExplorerFolderPath)
+                .Where(window => !snappedHandles.Contains(window.Handle))
+                .ToList();
+            var matches = MatchWindowBindings(bindingsToMatch, visibleWindows);
+            if (matches.Count == 0)
+            {
+                continue;
+            }
+
+            _ = ApplyWorkspaceWindowMatches(matches);
+            RestoreRuntimeWorkspaceStackOrder(watchBindings);
+            foreach (var match in matches)
+            {
+                restoredBindingKeys.Add(GetBindingInstanceKey(match.Binding));
+            }
+            ScheduleWorkspaceStackOrderStabilization(watchBindings, "workspace-launch-restore");
+
+            if (watchBindings.All(binding => TryGetLiveRuntimeBindingHandle(binding, out _)))
+            {
+                ScheduleLaunchedWorkspaceWindowHandoffWatch(
+                    watchBindings,
+                    excludedWindowHandle,
+                    includeExplorerFolderPath,
+                    deadline);
+                break;
+            }
+        }
+
+        var liveCount = watchBindings.Count(binding => TryGetLiveRuntimeBindingHandle(binding, out _));
+        PaneWorksLog.Info($"Launched workspace restore finished: attempts={attempt}, restored={restoredBindingKeys.Count}, live={liveCount}, watched={watchBindings.Count}");
+        return restoredBindingKeys.Count;
+    }
+
+    private void ScheduleLaunchedWorkspaceWindowHandoffWatch(
+        IReadOnlyList<WorkspaceWindowBinding> bindings,
+        IntPtr excludedWindowHandle,
+        bool includeExplorerFolderPath,
+        DateTimeOffset deadline)
+    {
+        var watchBindings = bindings.ToList();
+        if (watchBindings.Count == 0 || DateTimeOffset.UtcNow >= deadline)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var handoffCount = 0;
+                while (DateTimeOffset.UtcNow < deadline)
+                {
+                    await Task.Delay(WorkspaceLaunchRestoreRetryInterval);
+
+                    List<WorkspaceWindowBinding> bindingsToMatch = [];
+                    HashSet<IntPtr> snappedHandles = [];
+
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        bindingsToMatch = watchBindings
+                            .Where(binding => !TryGetLiveRuntimeBindingHandle(binding, out _))
+                            .ToList();
+                        snappedHandles = _snapBindings.Keys.ToHashSet();
+                    });
+
+                    if (bindingsToMatch.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var visibleWindows = _workspaceApplyService
+                        .GetVisibleWindows(excludedWindowHandle, includeExplorerFolderPath)
+                        .Where(window => !snappedHandles.Contains(window.Handle))
+                        .ToList();
+                    var matches = MatchWindowBindings(bindingsToMatch, visibleWindows);
+                    if (matches.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        handoffCount += ApplyWorkspaceWindowMatches(matches);
+                        RestoreRuntimeWorkspaceStackOrder(watchBindings);
+                        ScheduleWorkspaceStackOrderStabilization(watchBindings, "workspace-launch-handoff");
+                    });
+                }
+
+                if (handoffCount > 0)
+                {
+                    PaneWorksLog.Info($"Launched workspace handoff finished: restored={handoffCount}");
+                }
+            }
+            catch (Exception exception)
+            {
+                PaneWorksLog.Error("Launched workspace handoff watch failed", exception);
+            }
+        });
+    }
+
+    private int ApplyWorkspaceWindowMatches(IReadOnlyList<MatchedWindowBinding> matches)
+    {
+        if (matches.Count == 0)
+        {
+            return 0;
+        }
+
+        var restoredCount = 0;
+        var restoredMatches = new List<MatchedWindowBinding>();
+        var geometryByDisplay = new Dictionary<string, IReadOnlyDictionary<string, ComputedRegion>>(StringComparer.OrdinalIgnoreCase);
+
+        BeginInternalWindowLayoutUpdate();
+        try
+        {
+            foreach (var match in matches)
+            {
+                if (!TryGetBindingRegion(match.Binding, geometryByDisplay, out var region))
+                {
+                    continue;
+                }
+
+                var restoreBounds = ResolveRestoreBoundsForSnap(match.Window.Handle);
+                _snapBindings[match.Window.Handle] = new SnapBindingState(
+                    match.Binding.NodeId,
+                    match.Binding.DisplayId,
+                    restoreBounds);
+                _snapRuntimeBounds[match.Window.Handle] = region.Bounds;
+                _snapWindowInfoCache[match.Window.Handle] = match.Window;
+                _ = TrySnapWindowToBoundsWithStatus(match.Window.Handle, region.Bounds, "workspace-launch-restore");
+                ScheduleLaunchedWindowSnapStabilization(
+                    match.Window.Handle,
+                    match.Binding.DisplayId,
+                    match.Binding.NodeId,
+                    region.Bounds);
+                restoredCount++;
+                restoredMatches.Add(match);
+            }
+        }
+        finally
+        {
+            EndInternalWindowLayoutUpdate();
+        }
+
+        RestoreWorkspaceWindowStackOrder(restoredMatches);
+        return restoredCount;
+    }
+
+    private void ScheduleLaunchedWindowSnapStabilization(
+        IntPtr windowHandle,
+        string displayId,
+        string nodeId,
+        PaneRect targetBounds)
+    {
+        foreach (var delay in WorkspaceLaunchSnapStabilizationDelays)
+        {
+            _ = Task.Delay(delay).ContinueWith(_ =>
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    try
+                    {
+                        if (!_snapBindings.TryGetValue(windowHandle, out var binding)
+                            || !string.Equals(binding.DisplayId, displayId, StringComparison.OrdinalIgnoreCase)
+                            || !string.Equals(binding.NodeId, nodeId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
+
+                        if (_snapRuntimeBounds.TryGetValue(windowHandle, out var runtimeBounds)
+                            && !AreBoundsClose(runtimeBounds, targetBounds, 0.5))
+                        {
+                            return;
+                        }
+
+                        BeginInternalWindowLayoutUpdate();
+                        try
+                        {
+                            if (!_workspaceApplyService.TrySnapWindowToBounds(windowHandle, targetBounds, out var errorCode))
+                            {
+                                PaneWorksLog.Info($"Launched window snap stabilization skipped: 0x{windowHandle.ToInt64():X}, error={errorCode}");
+                                return;
+                            }
+                        }
+                        finally
+                        {
+                            EndInternalWindowLayoutUpdate();
+                        }
+
+                        PaneWorksLog.Info($"Launched window snap stabilized: 0x{windowHandle.ToInt64():X}, delay={delay.TotalSeconds:0}s");
+                        RestoreRuntimeWorkspaceStackOrder(ViewModel.GetActiveWorkspaceWindowBindings());
+                    }
+                    catch (Exception exception)
+                    {
+                        PaneWorksLog.Error("Launched window snap stabilization failed", exception);
+                    }
+                });
+            }, TaskScheduler.Default);
+        }
+    }
+
+    private void ScheduleWorkspaceStackOrderStabilization(
+        IReadOnlyList<WorkspaceWindowBinding> bindings,
+        string reason)
+    {
+        var bindingsSnapshot = bindings.ToList();
+        if (bindingsSnapshot.Count <= 1)
+        {
+            return;
+        }
+
+        foreach (var delay in WorkspaceLaunchSnapStabilizationDelays)
+        {
+            _ = Task.Delay(delay).ContinueWith(_ =>
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    try
+                    {
+                        RestoreRuntimeWorkspaceStackOrder(bindingsSnapshot);
+                    }
+                    catch (Exception exception)
+                    {
+                        PaneWorksLog.Error($"Workspace stack order stabilization failed: {reason}", exception);
+                    }
+                });
+            }, TaskScheduler.Default);
+        }
+    }
+
+    private static bool TryCreateWorkspaceLaunchInfo(
+        WorkspaceWindowBinding binding,
+        out ProcessStartInfo startInfo)
+    {
+        startInfo = default!;
+
+        if (IsExplorerFolderBinding(binding)
+            && !string.IsNullOrWhiteSpace(binding.LaunchTarget)
+            && Directory.Exists(binding.LaunchTarget))
+        {
+            startInfo = new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = QuoteProcessArgument(binding.LaunchTarget),
+                WorkingDirectory = binding.LaunchTarget,
+                UseShellExecute = true
+            };
+            return true;
+        }
+
+        if (TryCreatePackagedAppAliasLaunchInfo(binding, out startInfo))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(binding.ExecutablePath) && File.Exists(binding.ExecutablePath))
+        {
+            startInfo = new ProcessStartInfo
+            {
+                FileName = binding.ExecutablePath,
+                Arguments = ResolveWorkspaceLaunchArguments(binding),
+                WorkingDirectory = ResolveWorkspaceWorkingDirectory(binding),
+                UseShellExecute = true
+            };
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(binding.LaunchTarget))
+        {
+            startInfo = new ProcessStartInfo
+            {
+                FileName = binding.LaunchTarget,
+                UseShellExecute = true
+            };
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool CanLaunchWorkspaceBinding(WorkspaceWindowBinding binding)
+    {
+        if (IsExplorerFolderBinding(binding)
+            && !string.IsNullOrWhiteSpace(binding.LaunchTarget)
+            && Directory.Exists(binding.LaunchTarget))
+        {
+            return true;
+        }
+
+        return IsLaunchablePackagedAppBinding(binding)
+            || (!string.IsNullOrWhiteSpace(binding.ExecutablePath) && File.Exists(binding.ExecutablePath))
+            || !string.IsNullOrWhiteSpace(binding.LaunchTarget);
+    }
+
+    private static bool TryCreatePackagedAppAliasLaunchInfo(
+        WorkspaceWindowBinding binding,
+        out ProcessStartInfo startInfo)
+    {
+        startInfo = default!;
+
+        if (!IsLaunchablePackagedAppBinding(binding))
+        {
+            return false;
+        }
+
+        if (TryGetSystemNotepadPath(binding, out var notepadPath))
+        {
+            startInfo = new ProcessStartInfo
+            {
+                FileName = notepadPath,
+                Arguments = ResolveWorkspaceLaunchArguments(binding),
+                WorkingDirectory = Path.GetDirectoryName(notepadPath) ?? string.Empty,
+                UseShellExecute = true
+            };
+            return true;
+        }
+
+        startInfo = new ProcessStartInfo
+        {
+            FileName = GetProcessExecutableAlias(binding.ProcessName),
+            Arguments = ResolveWorkspaceLaunchArguments(binding),
+            UseShellExecute = true
+        };
+        return true;
+    }
+
+    private static bool IsLaunchablePackagedAppBinding(WorkspaceWindowBinding binding)
+    {
+        return !string.IsNullOrWhiteSpace(binding.ProcessName)
+            && IsWindowsAppsExecutablePath(binding.ExecutablePath);
+    }
+
+    private static bool TryGetSystemNotepadPath(
+        WorkspaceWindowBinding binding,
+        out string notepadPath)
+    {
+        notepadPath = string.Empty;
+        if (!IsNotepadBinding(binding))
+        {
+            return false;
+        }
+
+        var systemNotepadPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "notepad.exe");
+        if (!File.Exists(systemNotepadPath))
+        {
+            return false;
+        }
+
+        notepadPath = systemNotepadPath;
+        return true;
+    }
+
+    private static bool IsNotepadBinding(WorkspaceWindowBinding binding)
+    {
+        return string.Equals(binding.ProcessName, "Notepad", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(binding.ProcessName, "Notepad.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetProcessExecutableAlias(string processName)
+    {
+        var normalizedProcessName = processName.Trim();
+        return normalizedProcessName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? normalizedProcessName
+            : $"{normalizedProcessName}.exe";
+    }
+
+    private static bool IsWindowsAppsExecutablePath(string executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var normalizedPath = Path.GetFullPath(executablePath);
+            var windowsAppsPath = Path.GetFullPath(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "WindowsApps"));
+
+            return normalizedPath.StartsWith(
+                windowsAppsPath + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return executablePath.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static string ResolveWorkspaceLaunchArguments(WorkspaceWindowBinding binding)
+    {
+        if (!string.IsNullOrWhiteSpace(binding.LaunchArguments))
+        {
+            return binding.LaunchArguments;
+        }
+
+        return string.IsNullOrWhiteSpace(binding.LaunchTarget) ? string.Empty : binding.LaunchTarget;
+    }
+
+    private static string ResolveWorkspaceWorkingDirectory(WorkspaceWindowBinding binding)
+    {
+        if (!string.IsNullOrWhiteSpace(binding.WorkingDirectory) && Directory.Exists(binding.WorkingDirectory))
+        {
+            return binding.WorkingDirectory;
+        }
+
+        return TryGetWorkingDirectory(binding.ExecutablePath);
+    }
+
+    private static string QuoteProcessArgument(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+    }
+
+    private void RestoreWorkspaceWindowStackOrder(IReadOnlyList<MatchedWindowBinding> matches)
+    {
+        if (matches.Count <= 1)
+        {
+            return;
+        }
+
+        foreach (var group in matches.GroupBy(match => GetBindingKey(match.Binding), StringComparer.OrdinalIgnoreCase))
+        {
+            var windowHandles = group
+                .OrderByDescending(match => match.Binding.StackOrder)
+                .Select(match => match.Window.Handle)
+                .ToList();
+            _workspaceApplyService.ArrangeWindowsTopToBottom(windowHandles);
+        }
+    }
+
+    private void RestoreRuntimeWorkspaceStackOrder(IReadOnlyList<WorkspaceWindowBinding> bindings)
+    {
+        if (bindings.Count <= 1)
+        {
+            return;
+        }
+
+        foreach (var group in bindings.GroupBy(GetBindingKey, StringComparer.OrdinalIgnoreCase))
+        {
+            var windowHandles = new List<IntPtr>();
+            foreach (var binding in group.OrderByDescending(item => item.StackOrder))
+            {
+                if (TryGetLiveRuntimeBindingHandle(binding, out var windowHandle))
+                {
+                    windowHandles.Add(windowHandle);
+                }
+            }
+
+            _workspaceApplyService.ArrangeWindowsTopToBottom(windowHandles);
+        }
+    }
+
+    private bool TryGetLiveRuntimeBindingHandle(WorkspaceWindowBinding binding, out IntPtr windowHandle)
+    {
+        windowHandle = IntPtr.Zero;
+        var staleHandles = new List<IntPtr>();
+        var candidates = _snapBindings
+            .Where(item =>
+                string.Equals(item.Value.DisplayId, binding.DisplayId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.Value.NodeId, binding.NodeId, StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.Key)
+            .ToList();
+
+        foreach (var candidateHandle in candidates)
+        {
+            if (!_workspaceApplyService.TryGetVisibleWindowBounds(candidateHandle, out _))
+            {
+                staleHandles.Add(candidateHandle);
+                continue;
+            }
+
+            if (!_snapWindowInfoCache.TryGetValue(candidateHandle, out var windowInfo))
+            {
+                QueueSnappedWindowInfoCache(candidateHandle);
+                continue;
+            }
+
+            if (ScoreWindowBinding(binding, windowInfo) <= 0)
+            {
+                continue;
+            }
+
+            windowHandle = candidateHandle;
+            break;
+        }
+
+        foreach (var staleHandle in staleHandles)
+        {
+            _snapBindings.Remove(staleHandle);
+            _snapRuntimeBounds.Remove(staleHandle);
+            _snapWindowInfoCache.Remove(staleHandle);
+        }
+
+        return windowHandle != IntPtr.Zero;
     }
 
     private static List<MatchedWindowBinding> MatchWindowBindings(
@@ -2510,35 +3826,112 @@ public partial class MainWindow : Window
 
     private static int ScoreWindowBinding(WorkspaceWindowBinding binding, VisibleWindowInfo window)
     {
-        if (!string.Equals(binding.ProcessName, window.ProcessName, StringComparison.OrdinalIgnoreCase))
+        if (IsExplorerFolderBinding(binding))
+        {
+            var targetFolderPath = NormalizeFolderPath(binding.LaunchTarget);
+            var windowFolderPath = NormalizeFolderPath(window.ExplorerFolderPath);
+            if (string.IsNullOrWhiteSpace(targetFolderPath)
+                || string.IsNullOrWhiteSpace(windowFolderPath)
+                || !string.Equals(targetFolderPath, windowFolderPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            return 200 + (IsExplorerProcess(window.ProcessName) ? 20 : 0);
+        }
+
+        var score = 0;
+        if (!string.IsNullOrWhiteSpace(binding.ExecutablePath)
+            && !string.IsNullOrWhiteSpace(window.ExecutablePath)
+            && string.Equals(binding.ExecutablePath, window.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+        {
+            score += 50;
+        }
+
+        if (string.Equals(binding.ProcessName, window.ProcessName, StringComparison.OrdinalIgnoreCase))
+        {
+            score += 20;
+        }
+
+        if (score == 0)
         {
             return 0;
         }
 
         if (string.IsNullOrWhiteSpace(binding.WindowTitleSnapshot))
         {
-            return 10;
+            return score;
         }
 
         if (string.Equals(binding.WindowTitleSnapshot, window.Title, StringComparison.OrdinalIgnoreCase))
         {
-            return 30;
+            return score + 30;
         }
 
         if (window.Title.Contains(binding.WindowTitleSnapshot, StringComparison.OrdinalIgnoreCase)
             || binding.WindowTitleSnapshot.Contains(window.Title, StringComparison.OrdinalIgnoreCase))
         {
-            return 20;
+            return score + 20;
         }
 
-        return 10;
+        return score;
+    }
+
+    private static string GetBindingKey(WorkspaceWindowBinding binding)
+    {
+        return GetBindingKey(binding.DisplayId, binding.NodeId);
+    }
+
+    private static string GetBindingInstanceKey(WorkspaceWindowBinding binding)
+    {
+        return string.Join(
+            "::",
+            binding.DisplayId,
+            binding.NodeId,
+            binding.ProcessName,
+            binding.WindowTitleSnapshot,
+            binding.ExecutablePath,
+            binding.LaunchTarget,
+            binding.StackOrder.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private static string GetBindingKey(string displayId, string nodeId)
+    {
+        return $"{displayId}::{nodeId}";
+    }
+
+    private static bool IsExplorerFolderBinding(WorkspaceWindowBinding binding)
+    {
+        return string.Equals(binding.MatchKind, "ExplorerFolder", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(binding.LaunchTarget);
     }
 
     private sealed record MatchedWindowBinding(WorkspaceWindowBinding Binding, VisibleWindowInfo Window);
 
+    private sealed record SnappedWorkspaceWindowBindingRequest(
+        string DisplayId,
+        string NodeId,
+        VisibleWindowInfo WindowInfo,
+        int StackOrder);
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out NativePoint lpPoint);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetTopWindow(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
@@ -2558,5 +3951,12 @@ public partial class MainWindow : Window
         {
             Thread.Sleep(1);
         }
+    }
+
+    private enum SnapAssistMode
+    {
+        None,
+        SavedLayout,
+        RuntimeSession
     }
 }

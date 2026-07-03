@@ -5,7 +5,7 @@
 ## 三步使用
 
 1. 解压整个压缩包到任意目录
-2. 双击 `PaneWorks.App.exe`
+2. 双击 `PaneWorks.exe`
 3. 后续布局和设置会自动保存到 `%AppData%\PaneWorks\`
 
 ## 这个包适合什么人
@@ -16,7 +16,7 @@
 
 ## 包内文件说明
 
-- `PaneWorks.App.exe`：主程序
+- `PaneWorks.exe`：主程序
 - `README.md`：当前这份快速使用说明
 - `VERSION`：当前便携包版本号
 

@@ -14,6 +14,12 @@ public static class LayoutStoragePaths
         return Path.Combine(appData, "PaneWorks", "Layouts");
     }
 
+    public static string GetDefaultWorkspaceProfilesDirectory()
+    {
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        return Path.Combine(appData, "PaneWorks", "WorkspaceProfiles");
+    }
+
     public static string GetDefaultSessionStateFilePath()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);

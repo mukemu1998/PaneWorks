@@ -18,334 +18,696 @@
         Background="Transparent"
         Topmost="True"
         ShowInTaskbar="True">
-    <Grid>
-        <Grid.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#120A1222" Offset="0" />
-                <GradientStop Color="#210F1B30" Offset="0.5" />
-                <GradientStop Color="#12060B17" Offset="1" />
-            </LinearGradientBrush>
-        </Grid.Background>
+    <Grid Background="{x:Null}">
+        <Border Background="#28101625"
+                IsHitTestVisible="False"
+                Visibility="{Binding DesktopOverlayVisibility}" />
 
         <controls:EditorCanvasControl x:Name="EditorCanvas"
+                                      Visibility="{Binding DesktopOverlayVisibility}"
                                       Document="{Binding CurrentDocument}"
                                       SelectedNodeId="{Binding SelectedNodeId}"
                                       AvailableLayouts="{Binding Layouts}"
-                                      ActiveSnapLayoutId="{Binding ActiveSnapLayoutId}" />
+                                      ActiveSnapLayoutId="{Binding ActiveSnapLayoutId}"
+                                      AvailableWorkspaceProfiles="{Binding WorkspaceProfiles}"
+                                      ActiveWorkspaceProfileId="{Binding ActiveWorkspaceProfileId}"
+                                      IsLayoutEditingEnabled="{Binding IsLayoutEditMode}"
+                                      ShowWorkspaceBindingMarkers="{Binding IsWorkspaceBindingMode}"
+                                      BindingDisplayId="{Binding SelectedDisplayItem.Id}"
+                                      WorkspaceWindowBindings="{Binding ActiveWorkspaceWindowBindings}" />
 
         <Grid x:Name="WorkbenchPanel"
-              Width="1120"
-              MaxWidth="1180"
+              Width="820"
+              MaxHeight="680"
               HorizontalAlignment="Center"
               VerticalAlignment="Center"
               TextElement.Foreground="{StaticResource PaneTextBrush}">
-            <Border Background="#C9151B2A"
+            <Grid.RenderTransform>
+                <TranslateTransform x:Name="WorkbenchPanelTranslate" />
+            </Grid.RenderTransform>
+
+            <Border Background="#D2141A29"
                     BorderBrush="#42FFFFFF"
                     BorderThickness="1"
                     CornerRadius="30"
                     IsHitTestVisible="False" />
 
-            <Grid Margin="28">
+            <Grid Margin="22">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="24" />
+                    <RowDefinition Height="16" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="24" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Grid Grid.Row="0">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="18" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <Grid Grid.Row="0">
+                    <Grid>
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="24" />
+                            <ColumnDefinition Width="16" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel Grid.Column="0"
-                                    Margin="0,0,20,0">
-                            <TextBlock FontSize="30"
-                                       FontWeight="Bold"
-                                       IsHitTestVisible="False"
-                                       Text="PaneWorks 布局工作台" />
-                            <TextBlock Margin="0,8,0,0"
-                                       FontSize="14"
-                                       Foreground="#CFE7FF"
-                                       IsHitTestVisible="False"
-                                       Text="在桌面透明分割层上直接编辑布局，右键即可继续切分、删除分割、或快速切换吸附布局。"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
+                        <Grid Grid.Column="0"
+                              Grid.ColumnSpan="2"
+                              Background="Transparent"
+                              Cursor="SizeAll"
+                              MouseLeftButtonDown="WorkbenchDragHandle_MouseLeftButtonDown"
+                              MouseLeftButtonUp="WorkbenchDragHandle_MouseLeftButtonUp"
+                              MouseMove="WorkbenchDragHandle_MouseMove">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
 
-                        <WrapPanel Grid.Column="2"
-                                   Width="520"
-                                   HorizontalAlignment="Right"
-                                   VerticalAlignment="Top"
-                                   ItemWidth="100"
-                                   Orientation="Horizontal">
-                            <Button Margin="0,0,10,10"
-                                    Command="{Binding UndoCommand}"
-                                    Content="撤销" />
-                            <Button Margin="0,0,10,10"
-                                    Command="{Binding RedoCommand}"
-                                    Content="重做" />
-                            <Button Margin="0,0,10,10"
-                                    Style="{StaticResource PrimaryButtonStyle}"
-                                    Command="{Binding SaveLayoutCommand}"
-                                    Content="保存" />
-                            <Button Margin="0,0,10,10"
-                                    Command="{Binding SaveAsLayoutCommand}"
-                                    Content="另存为" />
-                            <Button Margin="0,0,10,10"
-                                    Command="{Binding NewLayoutCommand}"
-                                    Content="新建布局" />
-                            <Button Margin="0,0,0,10"
+                            <Image Grid.Column="0"
+                                   Width="54"
+                                   Height="54"
+                                   Margin="0,0,14,0"
+                                   VerticalAlignment="Center"
+                                   Source="Assets/PaneWorks.png"
+                                   Stretch="Uniform" />
+
+                            <StackPanel Grid.Column="1"
+                                        VerticalAlignment="Center">
+                                <TextBlock FontSize="25"
+                                           FontWeight="Bold"
+                                           IsHitTestVisible="False"
+                                           Text="PaneWorks 布局工作台" />
+                                <TextBlock Margin="0,6,0,0"
+                                           FontSize="13"
+                                           Foreground="#CFE7FF"
+                                           IsHitTestVisible="False"
+                                           Text="透明桌面分割层，管理吸附布局；需要窗口绑定时再展开高级工作区。"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Grid.Column="3"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Orientation="Horizontal">
+                            <Button MinWidth="78"
+                                    Margin="0,0,8,8"
                                     Click="SettingsButton_Click"
                                     Content="设置" />
-                        </WrapPanel>
-                    </Grid>
-
-                    <Grid Grid.Row="2">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="280" />
-                            <ColumnDefinition Width="24" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-
-                        <StackPanel Grid.Column="0">
-                            <TextBlock FontSize="13"
-                                       Foreground="#9FC7FF"
-                                       IsHitTestVisible="False"
-                                       Text="编辑屏幕" />
-                            <ComboBox Margin="0,8,0,0"
-                                      ItemsSource="{Binding Displays}"
-                                      SelectedItem="{Binding SelectedDisplayItem}"
-                                      MaxDropDownHeight="360">
-                                <ComboBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Margin="2,0">
-                                            <TextBlock FontSize="15"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{StaticResource PaneTextBrush}"
-                                                       Text="{Binding Name}" />
-                                            <TextBlock Margin="0,3,0,0"
-                                                       FontSize="12"
-                                                       Foreground="#D7E6FF"
-                                                       Text="{Binding Description}" />
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                            </ComboBox>
-                            <TextBlock Margin="0,8,0,0"
-                                       Foreground="#D7E6FF"
-                                       IsHitTestVisible="False"
-                                       Text="{Binding CurrentDisplaySummary}"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-
-                        <StackPanel Grid.Column="2">
-                            <TextBlock FontSize="13"
-                                       Foreground="#9FC7FF"
-                                       IsHitTestVisible="False"
-                                       Text="布局名称" />
-                            <TextBox Margin="0,8,0,0"
-                                     FontSize="24"
-                                     FontWeight="SemiBold"
-                                     Text="{Binding CurrentLayoutName, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Margin="0,10,0,0"
-                                       Foreground="#D7E6FF"
-                                       IsHitTestVisible="False"
-                                       Text="{Binding StatusLine}"
-                                       TextWrapping="Wrap" />
+                            <Button Style="{StaticResource CircleIconButtonStyle}"
+                                    Margin="0,0,8,8"
+                                    Click="SidebarWorkbenchButton_Click"
+                                    Content="⇥"
+                                    ToolTip="收起为侧边悬浮条" />
+                            <Button Style="{StaticResource CircleIconButtonStyle}"
+                                    Margin="0,0,8,8"
+                                    Click="MinimizeWorkbenchButton_Click"
+                                    Content="－"
+                                    ToolTip="最小化到任务栏" />
+                            <Button Style="{StaticResource CircleIconButtonStyle}"
+                                    Margin="0,0,0,8"
+                                    Click="CloseWorkbenchButton_Click"
+                                    Content="×"
+                                    ToolTip="退出到托盘" />
                         </StackPanel>
                     </Grid>
-                </Grid>
 
-                <Grid Grid.Row="2">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="1.08*" />
-                        <ColumnDefinition Width="22" />
-                        <ColumnDefinition Width="0.92*" />
-                    </Grid.ColumnDefinitions>
+                <ScrollViewer Grid.Row="2"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto"
+                              PanningMode="VerticalOnly">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="14" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="14" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-                    <Border Grid.Column="0"
-                            Padding="20"
+                    <Border Grid.Row="0"
+                            Padding="18"
                             Background="#90101625"
-                            BorderBrush="#24FFFFFF"
+                            BorderBrush="#26FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="22">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="14" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="14" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock FontSize="20"
+                                               FontWeight="SemiBold"
+                                               Text="吸附布局设置" />
+                                    <TextBlock Margin="0,6,0,0"
+                                               Foreground="#CFE7FF"
+                                               Text="{Binding StatusLine}"
+                                               TextWrapping="Wrap" />
+                                    <UniformGrid Margin="0,12,0,0"
+                                                 Columns="3">
+                                        <Border Margin="0,0,8,0"
+                                                Padding="12"
+                                                Background="#242F80ED"
+                                                BorderBrush="#3D9FC7FF"
+                                                BorderThickness="1"
+                                                CornerRadius="14">
+                                            <StackPanel>
+                                                <TextBlock FontSize="13"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource PaneTextBrush}"
+                                                           Text="1. 进入编辑后创建" />
+                                                <TextBlock Margin="0,5,0,0"
+                                                           FontSize="12"
+                                                           Foreground="#D7E6FF"
+                                                           Text="进入编辑后在屏幕区域内右键，选择横向或纵向二等分、三等分。"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Margin="4,0,4,0"
+                                                Padding="12"
+                                                Background="#242FA36B"
+                                                BorderBrush="#4DBFF7C7"
+                                                BorderThickness="1"
+                                                CornerRadius="14">
+                                            <StackPanel>
+                                                <TextBlock FontSize="13"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource PaneTextBrush}"
+                                                           Text="2. 进入编辑后拖动" />
+                                                <TextBlock Margin="0,5,0,0"
+                                                           FontSize="12"
+                                                           Foreground="#D7E6FF"
+                                                           Text="进入编辑后拖动黄色分割线实时改比例，蓝色表示当前选中分割线。"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Margin="8,0,0,0"
+                                                Padding="12"
+                                                Background="#24E35C61"
+                                                BorderBrush="#55E35C61"
+                                                BorderThickness="1"
+                                                CornerRadius="14">
+                                            <StackPanel>
+                                                <TextBlock FontSize="13"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource PaneTextBrush}"
+                                                           Text="3. 进入编辑后删除" />
+                                                <TextBlock Margin="0,5,0,0"
+                                                           FontSize="12"
+                                                           Foreground="#D7E6FF"
+                                                           Text="进入编辑后右键分割线选择删除，相邻区域会自动合并。"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                    </UniformGrid>
+                                </StackPanel>
+                                <TextBlock Grid.Column="1"
+                                           Margin="16,2,0,0"
+                                           Foreground="#BFF7C7"
+                                           Text="{Binding DirtyLabel}" />
+                            </Grid>
+
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="230" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock FontSize="13"
+                                               Foreground="#9FC7FF"
+                                               Text="编辑屏幕" />
+                                    <ComboBox Margin="0,8,0,0"
+                                              ItemsSource="{Binding Displays}"
+                                              SelectedItem="{Binding SelectedDisplayItem}"
+                                              MaxDropDownHeight="360">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="2,0">
+                                                    <TextBlock FontSize="15"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource PaneTextBrush}"
+                                                               Text="{Binding Name}" />
+                                                    <TextBlock Margin="0,3,0,0"
+                                                               FontSize="12"
+                                                               Foreground="#D7E6FF"
+                                                               Text="{Binding Description}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <TextBlock Margin="0,8,0,0"
+                                               Foreground="#D7E6FF"
+                                               Text="{Binding CurrentDisplaySummary}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock FontSize="13"
+                                               Foreground="#9FC7FF"
+                                               Text="当前吸附选择的分区布局" />
+                                    <TextBox Margin="0,8,0,0"
+                                             FontSize="20"
+                                             FontWeight="SemiBold"
+                                             IsReadOnly="{Binding IsLayoutNameReadOnly}"
+                                             Text="{Binding DisplayedLayoutName, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Margin="0,8,0,0"
+                                               FontWeight="SemiBold"
+                                               Foreground="#BFF7C7"
+                                               Text="{Binding LayoutEditModeLabel}" />
+                                    <TextBlock Margin="0,5,0,0"
+                                               FontSize="12"
+                                               Foreground="#CFE7FF"
+                                               Text="{Binding LayoutEditModeHint}"
+                                               TextWrapping="Wrap" />
+                                    <WrapPanel Margin="0,12,0,0">
+                                        <Button MinWidth="98"
+                                                Margin="0,0,8,8"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                Command="{Binding SaveLayoutCommand}"
+                                                Content="保存分区" />
+                                        <Button MinWidth="98"
+                                                Margin="0,0,8,8"
+                                                Command="{Binding SaveAsLayoutCommand}"
+                                                Content="另存分区" />
+                                        <Button MinWidth="98"
+                                                Margin="0,0,8,8"
+                                                Command="{Binding NewLayoutCommand}"
+                                                Content="新建分区" />
+                                        <Button MinWidth="116"
+                                                Margin="0,0,8,8"
+                                                Command="{Binding EditActiveSnapLayoutCommand}"
+                                                Content="编辑当前选择" />
+                                        <Button MinWidth="98"
+                                                Margin="0,0,0,8"
+                                                Command="{Binding ExitLayoutEditModeCommand}"
+                                                Content="退出编辑" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Grid.Row="4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1*" />
+                                    <ColumnDefinition Width="14" />
+                                    <ColumnDefinition Width="1*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0"
+                                        Padding="14"
+                                        Background="#66131A28"
+                                        BorderBrush="#20FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="18">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock FontSize="17"
+                                                   FontWeight="SemiBold"
+                                                   Text="已保存分区布局" />
+                                        <WrapPanel Grid.Row="1"
+                                                   Margin="0,12,0,10">
+                                            <Button Margin="0,0,8,8"
+                                                    Style="{StaticResource SuccessButtonStyle}"
+                                                    Command="{Binding SetSelectedLayoutAsSnapLayoutCommand}"
+                                                    Content="设为当前吸附" />
+                                            <Button Margin="0,0,8,8"
+                                                    Command="{Binding LoadSelectedLayoutCommand}"
+                                                    Content="打开编辑" />
+                                            <Button Margin="0,0,0,8"
+                                                    Style="{StaticResource DangerButtonStyle}"
+                                                    Command="{Binding DeleteSelectedLayoutCommand}"
+                                                    Content="删除" />
+                                        </WrapPanel>
+
+                                        <ListBox Grid.Row="2"
+                                                 MaxHeight="150"
+                                                 ItemsSource="{Binding Layouts}"
+                                                 SelectedItem="{Binding SelectedLayoutItem}">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Padding="10"
+                                                            Background="Transparent"
+                                                            CornerRadius="14">
+                                                        <StackPanel>
+                                                            <TextBlock FontSize="14"
+                                                                       FontWeight="SemiBold"
+                                                                       Text="{Binding Name}" />
+                                                            <TextBlock Margin="0,5,0,0"
+                                                                       Foreground="#CBE0FF"
+                                                                       Text="{Binding Description}"
+                                                                       TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="2"
+                                        Padding="14"
+                                        Background="#66131A28"
+                                        BorderBrush="#20FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="18">
+                                    <StackPanel>
+                                        <TextBlock FontSize="17"
+                                                   FontWeight="SemiBold"
+                                                   Text="当前吸附状态" />
+                                        <TextBlock Margin="0,12,0,0"
+                                                   Foreground="#BFF7C7"
+                                                   Text="{Binding SnapLayoutLabel}"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Margin="0,9,0,0"
+                                                   Foreground="#D7E6FF"
+                                                   Text="{Binding SelectionLabel}"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Margin="0,9,0,0"
+                                                   Foreground="#A9C8FF"
+                                                   Text="{Binding ShortcutSummary}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2"
+                            Background="#70101625"
+                            BorderBrush="#28FFFFFF"
                             BorderThickness="1"
                             CornerRadius="22">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
 
-                            <TextBlock FontSize="22"
-                                       FontWeight="SemiBold"
-                                       Text="已保存布局" />
-                            <WrapPanel Grid.Row="1"
-                                       Margin="0,18,0,14">
-                                <Button Margin="0,0,10,10"
-                                        Style="{StaticResource SuccessButtonStyle}"
-                                        Command="{Binding SetSelectedLayoutAsSnapLayoutCommand}"
-                                        Content="设为吸附布局" />
-                                <Button Margin="0,0,10,10"
-                                        Command="{Binding LoadSelectedLayoutCommand}"
-                                        Content="打开编辑" />
-                                <Button Margin="0,0,0,10"
-                                        Style="{StaticResource DangerButtonStyle}"
-                                        Command="{Binding DeleteSelectedLayoutCommand}"
-                                        Content="删除" />
-                            </WrapPanel>
-
-                            <ListBox Grid.Row="2"
-                                     ItemsSource="{Binding Layouts}"
-                                     SelectedItem="{Binding SelectedLayoutItem}">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border Padding="14"
+                            <ToggleButton x:Name="WorkspaceAdvancedToggle"
+                                          IsChecked="False"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          FocusVisualStyle="{x:Null}"
+                                          Focusable="False"
+                                          Cursor="Hand">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="HeaderBorder"
+                                                Padding="16,14"
                                                 Background="Transparent"
-                                                CornerRadius="14">
-                                            <StackPanel>
-                                                <TextBlock FontSize="16"
-                                                           FontWeight="SemiBold"
-                                                           Text="{Binding Name}" />
-                                                <TextBlock Margin="0,5,0,0"
-                                                           Foreground="#CBE0FF"
-                                                           Text="{Binding Description}"
-                                                           TextWrapping="Wrap" />
-                                            </StackPanel>
+                                                CornerRadius="22">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="12" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock FontSize="18"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource PaneTextBrush}"
+                                                               Text="工作区方案设置（高级编辑）" />
+                                                    <TextBlock Margin="0,4,0,0"
+                                                               FontSize="12"
+                                                               Foreground="#CFE7FF"
+                                                               Text="用于绑定窗口、启动软件并恢复到指定区域。" />
+                                                </StackPanel>
+
+                                                <Border Grid.Column="2"
+                                                        Width="34"
+                                                        Height="34"
+                                                        VerticalAlignment="Center"
+                                                        Background="#24FFFFFF"
+                                                        BorderBrush="#38FFFFFF"
+                                                        BorderThickness="1"
+                                                        CornerRadius="12">
+                                                    <Grid HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"
+                                                          Width="14"
+                                                          Height="10">
+                                                        <Path x:Name="ArrowCollapsed"
+                                                              Data="M 0 0 L 7 8 L 14 0 Z"
+                                                              Fill="{StaticResource PaneTextBrush}"
+                                                              Stretch="Uniform" />
+                                                        <Path x:Name="ArrowExpanded"
+                                                              Data="M 0 8 L 7 0 L 14 8 Z"
+                                                              Fill="{StaticResource PaneTextBrush}"
+                                                              Stretch="Uniform"
+                                                              Visibility="Collapsed" />
+                                                    </Grid>
+                                                </Border>
+                                            </Grid>
                                         </Border>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="HeaderBorder" Property="Background" Value="#18FFFFFF" />
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="ArrowCollapsed" Property="Visibility" Value="Collapsed" />
+                                                <Setter TargetName="ArrowExpanded" Property="Visibility" Value="Visible" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+
+                            <Grid Grid.Row="1"
+                                  Margin="16,8,16,16">
+                                <Grid.Style>
+                                    <Style TargetType="Grid">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=WorkspaceAdvancedToggle}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Grid.Style>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="1*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0"
+                                    Padding="14"
+                                    Background="#66131A28"
+                                    BorderBrush="#20FFFFFF"
+                                    BorderThickness="1"
+                                    CornerRadius="18">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock FontSize="17"
+                                               FontWeight="SemiBold"
+                                               Text="工作区方案" />
+                                    <TextBlock Grid.Row="1"
+                                               Margin="0,10,0,0"
+                                               Foreground="#D8B4FF"
+                                               Text="{Binding WorkspaceProfileLabel}"
+                                               TextWrapping="Wrap" />
+
+                                    <WrapPanel Grid.Row="2"
+                                               Margin="0,12,0,10">
+                                        <Button Margin="0,0,8,8"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                Click="ActivateSelectedWorkspaceProfileButton_Click"
+                                                Content="应用选中工作区" />
+                                        <Button Margin="0,0,8,8"
+                                                Command="{Binding CreateWorkspaceProfileFromCurrentLayoutCommand}"
+                                                Content="从当前吸附创建" />
+                                        <Button Margin="0,0,8,8"
+                                                Command="{Binding NewWorkspaceProfileCommand}"
+                                                Content="从选中分区创建" />
+                                        <Button Margin="0,0,8,8"
+                                                Command="{Binding BeginWorkspaceBindingModeCommand}"
+                                                Content="编辑绑定" />
+                                        <Button Margin="0,0,8,8"
+                                                Command="{Binding ExitWorkspaceBindingModeCommand}"
+                                                Content="退出绑定" />
+                                        <Button Margin="0,0,8,8"
+                                                Command="{Binding SaveWorkspaceProfileCommand}"
+                                                Content="保存" />
+                                        <Button Margin="0,0,8,8"
+                                                Command="{Binding SaveAsWorkspaceProfileCommand}"
+                                                Content="另存" />
+                                        <Button Margin="0,0,0,8"
+                                                Style="{StaticResource DangerButtonStyle}"
+                                                Command="{Binding DeleteSelectedWorkspaceProfileCommand}"
+                                                Content="删除" />
+                                    </WrapPanel>
+
+                                    <ListBox Grid.Row="3"
+                                             MaxHeight="150"
+                                             ItemsSource="{Binding WorkspaceProfiles}"
+                                             SelectedItem="{Binding SelectedWorkspaceProfileItem}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Padding="10"
+                                                        Background="Transparent"
+                                                        CornerRadius="14">
+                                                    <StackPanel>
+                                                        <TextBlock FontSize="14"
+                                                                   FontWeight="SemiBold"
+                                                                   Text="{Binding Name}" />
+                                                        <TextBlock Margin="0,5,0,0"
+                                                                   Text="{Binding Description}"
+                                                                   TextWrapping="Wrap">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Foreground" Value="#CBE0FF" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsEmptyWorkspaceBinding}" Value="True">
+                                                                            <Setter Property="Foreground" Value="#FF8A8A" />
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding HasWorkspaceBinding}" Value="True">
+                                                                            <Setter Property="Foreground" Value="#7DFFB2" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Column="2"
+                                    Padding="14"
+                                    Background="#66131A28"
+                                    BorderBrush="#20FFFFFF"
+                                    BorderThickness="1"
+                                    CornerRadius="18">
+                                <StackPanel>
+                                    <TextBlock FontSize="17"
+                                               FontWeight="SemiBold"
+                                               Text="区域窗口绑定" />
+                                    <TextBlock Margin="0,12,0,0"
+                                               FontWeight="SemiBold"
+                                               Foreground="#BFF7C7"
+                                               Text="{Binding SelectedRegionBindingSummary}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,9,0,0"
+                                               Foreground="#D7E6FF"
+                                               Text="{Binding SelectedRegionBindingDescription}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,9,0,0"
+                                               FontWeight="SemiBold"
+                                               Foreground="#D8B4FF"
+                                               Text="{Binding WorkspaceBindingModeLabel}"
+                                               TextWrapping="Wrap" />
+                                    <WrapPanel Margin="0,12,0,0">
+                                        <Button Margin="0,0,8,8"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                IsEnabled="{Binding CanEditWorkspaceBindings}"
+                                                Click="BindWindowButton_Click"
+                                                Content="手动绑定窗口" />
+                                        <Button Margin="0,0,8,8"
+                                                Style="{StaticResource SuccessButtonStyle}"
+                                                IsEnabled="{Binding CanEditWorkspaceBindings}"
+                                                Click="AutoBindSnappedWindowsButton_Click"
+                                                Content="一键绑定已吸附" />
+                                        <Button Margin="0,0,8,8"
+                                                Style="{StaticResource DangerButtonStyle}"
+                                                IsEnabled="{Binding CanEditWorkspaceBindings}"
+                                                Click="ClearWindowBindingButton_Click"
+                                                Content="清除选中绑定" />
+                                        <Button Margin="0,0,0,8"
+                                                Style="{StaticResource DangerButtonStyle}"
+                                                IsEnabled="{Binding CanEditWorkspaceBindings}"
+                                                Click="ClearAllWindowBindingsButton_Click"
+                                                Content="清除全部绑定" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+                            </Grid>
                         </Grid>
                     </Border>
 
-                    <StackPanel Grid.Column="2">
-                        <Border Padding="20"
-                                Background="#90101625"
-                                BorderBrush="#24FFFFFF"
-                                BorderThickness="1"
-                                CornerRadius="22"
-                                IsHitTestVisible="False">
-                            <StackPanel>
-                                <TextBlock FontSize="22"
-                                           FontWeight="SemiBold"
-                                           Text="当前状态" />
-                                <TextBlock Margin="0,16,0,0"
-                                           FontSize="15"
-                                           FontWeight="SemiBold"
-                                           Text="{Binding DirtyLabel}" />
-                                <TextBlock Margin="0,10,0,0"
-                                           Foreground="#BFF7C7"
-                                           Text="{Binding SnapLayoutLabel}"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,10,0,0"
-                                           Foreground="#D7E6FF"
-                                           Text="{Binding SelectionLabel}"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,10,0,0"
-                                           Foreground="#A9C8FF"
-                                           Text="{Binding ShortcutSummary}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Margin="0,18,0,0"
-                                Padding="20"
-                                Background="#90101625"
-                                BorderBrush="#24FFFFFF"
-                                BorderThickness="1"
-                                CornerRadius="22">
-                            <StackPanel>
-                                <TextBlock FontSize="22"
-                                           FontWeight="SemiBold"
-                                           Text="区域绑定" />
-                                <TextBlock Margin="0,16,0,0"
-                                           FontWeight="SemiBold"
-                                           Foreground="#BFF7C7"
-                                           Text="{Binding SelectedRegionBindingSummary}"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,10,0,0"
-                                           Foreground="#D7E6FF"
-                                           Text="{Binding SelectedRegionBindingDescription}"
-                                           TextWrapping="Wrap" />
-                                <WrapPanel Margin="0,18,0,0">
-                                    <Button Margin="0,0,10,10"
-                                            Style="{StaticResource PrimaryButtonStyle}"
-                                            Click="BindWindowButton_Click"
-                                            Content="选择窗口绑定" />
-                                    <Button Margin="0,0,10,10"
-                                            Style="{StaticResource SuccessButtonStyle}"
-                                            Click="RestoreBoundWindowsButton_Click"
-                                            Content="恢复绑定窗口" />
-                                    <Button Margin="0,0,0,10"
-                                            Style="{StaticResource DangerButtonStyle}"
-                                            Click="ClearWindowBindingButton_Click"
-                                            Content="清除绑定" />
-                                </WrapPanel>
-                            </StackPanel>
-                        </Border>
-
-                        <Border Margin="0,18,0,0"
-                                Padding="20"
-                                Background="#90101625"
-                                BorderBrush="#24FFFFFF"
-                                BorderThickness="1"
-                                CornerRadius="22"
-                                IsHitTestVisible="False">
-                            <StackPanel>
-                                <TextBlock FontSize="22"
-                                           FontWeight="SemiBold"
-                                           Text="操作提示" />
-                                <TextBlock Margin="0,16,0,0"
-                                           Foreground="#D7E6FF"
-                                           Text="1. 顶部“编辑屏幕”可以切换每块显示器的独立布局。"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,8,0,0"
-                                           Foreground="#D7E6FF"
-                                           Text="2. 右键区域可添加横向或纵向二等分、三等分。"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,8,0,0"
-                                           Foreground="#D7E6FF"
-                                           Text="3. 右键分割线可直接删除当前分割，拖动分割线会实时调整比例。"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,8,0,0"
-                                           Foreground="#D7E6FF"
-                                           Text="4. 右键菜单里的“快速切换吸附布局”会立刻更新当前屏幕后续 Shift 吸附使用的布局。"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,8,0,0"
-                                           Foreground="#D7E6FF"
-                                           Text="5. 拖动窗口时按住吸附触发键会按窗口所在屏幕显示对应吸附布局，高亮区域后松手即可吸附。"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Margin="0,8,0,0"
-                                           Foreground="#D7E6FF"
-                                           Text="6. 最小化快捷键会把工具收进托盘，真正退出请使用托盘右键菜单。"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
+                    <Border Grid.Row="4"
+                            Padding="14,12"
+                            Background="#80131A28"
+                            BorderBrush="#20FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="18"
+                            IsHitTestVisible="False">
+                        <TextBlock Foreground="#A9C8FF"
+                                   Text="提示：右键区域继续切分，右键分割线删除分割；“切换吸附布局”只影响后续用户分区吸附，“工作区方案”用于窗口绑定和自动恢复。"
+                                   TextWrapping="Wrap" />
+                    </Border>
                 </Grid>
-
-                <Border Grid.Row="4"
-                        Padding="18,16"
-                        Background="#80131A28"
-                        BorderBrush="#20FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="18"
-                        IsHitTestVisible="False">
-                    <TextBlock Foreground="#A9C8FF"
-                               Text="现在启动后默认进入吸附待命。右键菜单、设置窗口、布局切换都会保持在最顶层，方便你直接在桌面流里连续操作。"
-                               TextWrapping="Wrap" />
-                </Border>
+                </ScrollViewer>
             </Grid>
         </Grid>
+
+        <Button x:Name="WorkbenchMiniBar"
+                Width="62"
+                Height="106"
+                Margin="0,0,14,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Background="#D2141A29"
+                BorderBrush="#42FFFFFF"
+                BorderThickness="1"
+                Cursor="Hand"
+                Click="RestoreWorkbenchButton_Click"
+                ToolTip="展开 PaneWorks 主菜单"
+                Visibility="Collapsed">
+            <Button.Template>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="MiniBarBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="20">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="MiniBarBorder" Property="Background" Value="#E01D2638" />
+                            <Setter TargetName="MiniBarBorder" Property="BorderBrush" Value="#7D9FC7FF" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="MiniBarBorder" Property="Opacity" Value="0.82" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Button.Template>
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                <Image Width="34"
+                       Height="34"
+                       Source="Assets/PaneWorks.png"
+                       Stretch="Uniform" />
+                <TextBlock Margin="0,8,0,0"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource PaneTextBrush}"
+                           Text="展开"
+                           TextAlignment="Center" />
+            </StackPanel>
+        </Button>
     </Grid>
 </Window>

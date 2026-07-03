@@ -173,24 +173,7 @@ public sealed class JsonLayoutRepository : ILayoutRepository
         {
             DisplayLayouts = document.DisplayLayouts is null
                 ? new Dictionary<string, LayoutDocument>(StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, LayoutDocument>(document.DisplayLayouts, StringComparer.OrdinalIgnoreCase),
-            WindowBindings = document.WindowBindings is null
-                ? new List<WorkspaceWindowBinding>()
-                : document.WindowBindings
-                    .Where(item =>
-                        !string.IsNullOrWhiteSpace(item.DisplayId)
-                        && !string.IsNullOrWhiteSpace(item.NodeId)
-                        && !string.IsNullOrWhiteSpace(item.ProcessName))
-                    .Select(item => item with
-                    {
-                        DisplayId = item.DisplayId.Trim(),
-                        NodeId = item.NodeId.Trim(),
-                        ProcessName = item.ProcessName.Trim(),
-                        WindowTitleSnapshot = item.WindowTitleSnapshot?.Trim() ?? string.Empty
-                    })
-                    .GroupBy(item => $"{item.DisplayId}::{item.NodeId}", StringComparer.OrdinalIgnoreCase)
-                    .Select(group => group.Last())
-                    .ToList()
+                : new Dictionary<string, LayoutDocument>(document.DisplayLayouts, StringComparer.OrdinalIgnoreCase)
         };
     }
 

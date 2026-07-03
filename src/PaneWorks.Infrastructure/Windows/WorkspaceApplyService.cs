@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using PaneWorks.Core.Models;
-using PaneWorks.Core.Services;
 
 namespace PaneWorks.Infrastructure.Windows;
 
@@ -15,10 +14,13 @@ public readonly record struct WindowBoundsUpdate(IntPtr WindowHandle, PaneRect B
 public sealed class WorkspaceApplyService
 {
     private const double SnapSeamOverlap = 1;
+    private static readonly TimeSpan ExplorerFolderLookupTimeout = TimeSpan.FromMilliseconds(350);
     private const int GwlExStyle = -20;
     private const int WsExToolWindow = 0x00000080;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoSize = 0x0001;
     private const int DwmaCloaked = 14;
     private const int DwmaExtendedFrameBounds = 9;
     private const int DwmaWindowCornerPreference = 33;
@@ -32,46 +34,24 @@ public sealed class WorkspaceApplyService
     private const uint SmtoAbortIfHung = 0x0002;
     private const nuint HtCaption = 0x0002;
 
-    private readonly LayoutGeometryCalculator _geometryCalculator = new();
-
-    public WorkspaceApplyResult Apply(LayoutDocument document, PaneRect rootBounds, IntPtr excludedWindowHandle)
+    public void SnapWindowToBounds(IntPtr windowHandle, PaneRect bounds)
     {
-        var geometry = _geometryCalculator.Compute(document, rootBounds, splitterThickness: 0);
-
-        var orderedRegions = geometry.Regions
-            .OrderBy(region => region.Bounds.Y)
-            .ThenBy(region => region.Bounds.X)
-            .ToList();
-
-        var windows = EnumerateCandidateWindows(excludedWindowHandle);
-        var appliedCount = Math.Min(orderedRegions.Count, windows.Count);
-
-        for (var index = 0; index < appliedCount; index++)
-        {
-            var region = orderedRegions[index];
-            SnapWindowToBounds(windows[index].Handle, region.Bounds);
-        }
-
-        return new WorkspaceApplyResult(
-            orderedRegions.Count,
-            windows.Count,
-            appliedCount,
-            Math.Max(0, orderedRegions.Count - appliedCount),
-            Math.Max(0, windows.Count - appliedCount));
+        _ = TrySnapWindowToBounds(windowHandle, bounds, out _);
     }
 
-    public void SnapWindowToBounds(IntPtr windowHandle, PaneRect bounds)
+    public bool TrySnapWindowToBounds(IntPtr windowHandle, PaneRect bounds, out int errorCode)
     {
         if (windowHandle == IntPtr.Zero)
         {
-            return;
+            errorCode = 0;
+            return false;
         }
 
         TryDisableRoundedCorners(windowHandle);
         var seamCoveredBounds = ExpandBoundsForSeamCover(bounds);
         var targetBounds = AdjustWindowBoundsForFrame(windowHandle, seamCoveredBounds);
 
-        SetWindowPos(
+        var moved = SetWindowPos(
             windowHandle,
             IntPtr.Zero,
             (int)Math.Round(targetBounds.X),
@@ -79,6 +59,8 @@ public sealed class WorkspaceApplyService
             Math.Max(0, (int)Math.Round(targetBounds.Width)),
             Math.Max(0, (int)Math.Round(targetBounds.Height)),
             SwpNoZOrder | SwpNoActivate);
+        errorCode = moved ? 0 : Marshal.GetLastWin32Error();
+        return moved;
     }
 
     public void RestoreWindowToBounds(IntPtr windowHandle, PaneRect bounds)
@@ -206,6 +188,40 @@ public sealed class WorkspaceApplyService
         }
     }
 
+    public void BringWindowToTop(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        SetWindowPos(
+            windowHandle,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            SwpNoMove | SwpNoSize | SwpNoActivate);
+    }
+
+    public void ArrangeWindowsTopToBottom(IReadOnlyList<IntPtr> windowHandles)
+    {
+        var previousWindowHandle = IntPtr.Zero;
+        foreach (var windowHandle in windowHandles.Where(handle => handle != IntPtr.Zero))
+        {
+            SetWindowPos(
+                windowHandle,
+                previousWindowHandle,
+                0,
+                0,
+                0,
+                0,
+                SwpNoMove | SwpNoSize | SwpNoActivate);
+            previousWindowHandle = windowHandle;
+        }
+    }
+
     public WindowFrameAdjustment GetWindowFrameAdjustment(IntPtr windowHandle)
     {
         return TryGetWindowFrameAdjustment(windowHandle, out var frameAdjustment)
@@ -250,12 +266,37 @@ public sealed class WorkspaceApplyService
 
     public IReadOnlyList<VisibleWindowInfo> GetVisibleWindows(IntPtr excludedWindowHandle)
     {
-        return EnumerateCandidateWindows(excludedWindowHandle)
-            .Select(item => new VisibleWindowInfo(item.Handle, item.ProcessName, item.Title))
+        return GetVisibleWindows(excludedWindowHandle, includeExplorerFolderPath: true);
+    }
+
+    public IReadOnlyList<VisibleWindowInfo> GetVisibleWindows(
+        IntPtr excludedWindowHandle,
+        bool includeExplorerFolderPath)
+    {
+        return EnumerateCandidateWindows(excludedWindowHandle, includeExplorerFolderPath)
+            .Select(item => new VisibleWindowInfo(
+                item.Handle,
+                item.ProcessName,
+                item.Title,
+                item.ExecutablePath,
+                item.ExplorerFolderPath))
             .ToList();
     }
 
     public bool TryGetVisibleWindowInfo(IntPtr windowHandle, IntPtr excludedWindowHandle, out VisibleWindowInfo windowInfo)
+    {
+        return TryGetVisibleWindowInfo(
+            windowHandle,
+            excludedWindowHandle,
+            includeExplorerFolderPath: true,
+            out windowInfo);
+    }
+
+    public bool TryGetVisibleWindowInfo(
+        IntPtr windowHandle,
+        IntPtr excludedWindowHandle,
+        bool includeExplorerFolderPath,
+        out VisibleWindowInfo windowInfo)
     {
         windowInfo = default!;
         if (windowHandle == IntPtr.Zero)
@@ -265,15 +306,38 @@ public sealed class WorkspaceApplyService
 
         var currentProcessId = Environment.ProcessId;
         var shellWindow = GetShellWindow();
-        var context = new EnumerationContext(new List<WindowCandidate>(), excludedWindowHandle, shellWindow, currentProcessId);
+        var context = new EnumerationContext(
+            new List<WindowCandidate>(),
+            excludedWindowHandle,
+            shellWindow,
+            currentProcessId,
+            includeExplorerFolderPath
+                ? GetExplorerFolderPathsByHandle()
+                : new Dictionary<IntPtr, string>());
 
         if (!TryCreateWindowCandidate(windowHandle, context, out var candidate))
         {
             return false;
         }
 
-        windowInfo = new VisibleWindowInfo(candidate.Handle, candidate.ProcessName, candidate.Title);
+        windowInfo = new VisibleWindowInfo(
+            candidate.Handle,
+            candidate.ProcessName,
+            candidate.Title,
+            candidate.ExecutablePath,
+            candidate.ExplorerFolderPath);
         return true;
+    }
+
+    public bool TryGetExplorerFolderPath(IntPtr windowHandle, out string folderPath)
+    {
+        folderPath = string.Empty;
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        return GetExplorerFolderPathsByHandle().TryGetValue(windowHandle, out folderPath!);
     }
 
     private static bool TryGetCursorPosition(out NativePoint point)
@@ -428,13 +492,22 @@ public sealed class WorkspaceApplyService
         }
     }
 
-    private static List<WindowCandidate> EnumerateCandidateWindows(IntPtr excludedWindowHandle)
+    private static List<WindowCandidate> EnumerateCandidateWindows(
+        IntPtr excludedWindowHandle,
+        bool includeExplorerFolderPath = true)
     {
         var currentProcessId = Environment.ProcessId;
         var shellWindow = GetShellWindow();
         var windows = new List<WindowCandidate>();
 
-        var contextHandle = GCHandle.Alloc(new EnumerationContext(windows, excludedWindowHandle, shellWindow, currentProcessId));
+        var contextHandle = GCHandle.Alloc(new EnumerationContext(
+            windows,
+            excludedWindowHandle,
+            shellWindow,
+            currentProcessId,
+            includeExplorerFolderPath
+                ? GetExplorerFolderPathsByHandle()
+                : new Dictionary<IntPtr, string>()));
         try
         {
             EnumWindows(
@@ -489,13 +562,17 @@ public sealed class WorkspaceApplyService
             return false;
         }
 
-        var processName = GetProcessName(processId);
-        if (string.IsNullOrWhiteSpace(processName))
+        if (!TryGetProcessInfo(processId, out var processName, out var executablePath)
+            || string.IsNullOrWhiteSpace(processName))
         {
             return false;
         }
 
-        candidate = new WindowCandidate(handle, processName, title);
+        var explorerFolderPath = context.ExplorerFolderPathsByHandle.TryGetValue(handle, out var folderPath)
+            ? folderPath
+            : string.Empty;
+
+        candidate = new WindowCandidate(handle, processName, title, executablePath, explorerFolderPath);
         return true;
     }
 
@@ -512,16 +589,30 @@ public sealed class WorkspaceApplyService
         return builder.ToString();
     }
 
-    private static string GetProcessName(uint processId)
+    private static bool TryGetProcessInfo(uint processId, out string processName, out string executablePath)
     {
+        processName = string.Empty;
+        executablePath = string.Empty;
+
         try
         {
             using var process = Process.GetProcessById((int)processId);
-            return process.ProcessName;
+            processName = process.ProcessName;
+
+            try
+            {
+                executablePath = process.MainModule?.FileName ?? string.Empty;
+            }
+            catch
+            {
+                executablePath = string.Empty;
+            }
+
+            return !string.IsNullOrWhiteSpace(processName);
         }
         catch
         {
-            return string.Empty;
+            return false;
         }
     }
 
@@ -554,13 +645,164 @@ public sealed class WorkspaceApplyService
         }
     }
 
-    private sealed record WindowCandidate(IntPtr Handle, string ProcessName, string Title);
+    private static IReadOnlyDictionary<IntPtr, string> GetExplorerFolderPathsByHandle()
+    {
+        IReadOnlyDictionary<IntPtr, string> pathsByHandle = new Dictionary<IntPtr, string>();
+        var completed = new ManualResetEventSlim(false);
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                pathsByHandle = GetExplorerFolderPathsByHandleCore();
+            }
+            finally
+            {
+                completed.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "PaneWorks Explorer Folder Lookup"
+        };
+
+        try
+        {
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            return completed.Wait(ExplorerFolderLookupTimeout)
+                ? pathsByHandle
+                : new Dictionary<IntPtr, string>();
+        }
+        catch
+        {
+            return new Dictionary<IntPtr, string>();
+        }
+    }
+
+    private static IReadOnlyDictionary<IntPtr, string> GetExplorerFolderPathsByHandleCore()
+    {
+        var pathsByHandle = new Dictionary<IntPtr, string>();
+
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("Shell.Application");
+            if (shellType is null)
+            {
+                return pathsByHandle;
+            }
+
+            dynamic? shell = Activator.CreateInstance(shellType);
+            if (shell is null)
+            {
+                return pathsByHandle;
+            }
+
+            try
+            {
+                foreach (var window in shell.Windows())
+                {
+                    try
+                    {
+                        var handle = new IntPtr(Convert.ToInt64(window.HWND));
+                        var locationUrl = Convert.ToString(window.LocationURL) ?? string.Empty;
+                        if (TryConvertExplorerLocationUrlToPath(locationUrl, out string folderPath))
+                        {
+                            pathsByHandle[handle] = folderPath;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                    finally
+                    {
+                        TryReleaseComObject(window);
+                    }
+                }
+            }
+            finally
+            {
+                TryReleaseComObject(shell);
+            }
+        }
+        catch
+        {
+        }
+
+        return pathsByHandle;
+    }
+
+    private static bool TryConvertExplorerLocationUrlToPath(string locationUrl, out string folderPath)
+    {
+        folderPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(locationUrl))
+        {
+            return false;
+        }
+
+        try
+        {
+            var uri = new Uri(locationUrl);
+            if (!uri.IsFile)
+            {
+                return false;
+            }
+
+            var localPath = Uri.UnescapeDataString(uri.LocalPath);
+            if (!Directory.Exists(localPath))
+            {
+                return false;
+            }
+
+            folderPath = TrimTrailingDirectorySeparators(localPath);
+            return !string.IsNullOrWhiteSpace(folderPath);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string TrimTrailingDirectorySeparators(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        if (!string.IsNullOrWhiteSpace(root)
+            && string.Equals(path, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.IsNullOrWhiteSpace(trimmed) ? path : trimmed;
+    }
+
+    private static void TryReleaseComObject(object? comObject)
+    {
+        try
+        {
+            if (comObject is not null && Marshal.IsComObject(comObject))
+            {
+                Marshal.FinalReleaseComObject(comObject);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private sealed record WindowCandidate(
+        IntPtr Handle,
+        string ProcessName,
+        string Title,
+        string ExecutablePath,
+        string ExplorerFolderPath);
 
     private sealed record EnumerationContext(
         List<WindowCandidate> Windows,
         IntPtr ExcludedWindowHandle,
         IntPtr ShellWindow,
-        int CurrentProcessId);
+        int CurrentProcessId,
+        IReadOnlyDictionary<IntPtr, string> ExplorerFolderPathsByHandle);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect

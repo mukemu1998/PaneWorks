@@ -318,27 +318,40 @@ public static class ShortcutGestureHelper
     private static ModifierKeys GetPressedModifiers()
     {
         var modifiers = ModifierKeys.None;
-        if (IsVirtualKeyPressed(0x11))
+        if (IsAnyVirtualKeyPressed(0x11, 0xA2, 0xA3))
         {
             modifiers |= ModifierKeys.Control;
         }
 
-        if (IsVirtualKeyPressed(0x10))
+        if (IsAnyVirtualKeyPressed(0x10, 0xA0, 0xA1))
         {
             modifiers |= ModifierKeys.Shift;
         }
 
-        if (IsVirtualKeyPressed(0x12))
+        if (IsAnyVirtualKeyPressed(0x12, 0xA4, 0xA5))
         {
             modifiers |= ModifierKeys.Alt;
         }
 
-        if (IsVirtualKeyPressed(0x5B) || IsVirtualKeyPressed(0x5C))
+        if (IsAnyVirtualKeyPressed(0x5B, 0x5C))
         {
             modifiers |= ModifierKeys.Windows;
         }
 
         return modifiers;
+    }
+
+    private static bool IsAnyVirtualKeyPressed(params int[] virtualKeys)
+    {
+        foreach (var virtualKey in virtualKeys)
+        {
+            if (IsVirtualKeyPressed(virtualKey))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsVirtualKeyPressed(int virtualKey)

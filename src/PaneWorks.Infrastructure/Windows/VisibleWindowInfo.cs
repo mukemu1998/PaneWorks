@@ -3,4 +3,6 @@ namespace PaneWorks.Infrastructure.Windows;
 public sealed record VisibleWindowInfo(
     IntPtr Handle,
     string ProcessName,
-    string Title);
+    string Title,
+    string ExecutablePath,
+    string ExplorerFolderPath = "");

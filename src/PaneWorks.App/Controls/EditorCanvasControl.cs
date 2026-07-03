@@ -2,7 +2,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using PaneWorks.App.ViewModels;
 using PaneWorks.Core.Models;
 using PaneWorks.Core.Services;
@@ -57,6 +59,20 @@ public sealed class EditorCanvasControl : FrameworkElement
             typeof(EditorCanvasControl),
             new FrameworkPropertyMetadata(string.Empty));
 
+    public static readonly DependencyProperty AvailableWorkspaceProfilesProperty =
+        DependencyProperty.Register(
+            nameof(AvailableWorkspaceProfiles),
+            typeof(IEnumerable<LayoutListItemViewModel>),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(null));
+
+    public static readonly DependencyProperty ActiveWorkspaceProfileIdProperty =
+        DependencyProperty.Register(
+            nameof(ActiveWorkspaceProfileId),
+            typeof(string),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(string.Empty));
+
     public static readonly DependencyProperty StageBoundsProperty =
         DependencyProperty.Register(
             nameof(StageBounds),
@@ -71,8 +87,37 @@ public sealed class EditorCanvasControl : FrameworkElement
             typeof(EditorCanvasControl),
             new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty IsLayoutEditingEnabledProperty =
+        DependencyProperty.Register(
+            nameof(IsLayoutEditingEnabled),
+            typeof(bool),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty ShowWorkspaceBindingMarkersProperty =
+        DependencyProperty.Register(
+            nameof(ShowWorkspaceBindingMarkers),
+            typeof(bool),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty BindingDisplayIdProperty =
+        DependencyProperty.Register(
+            nameof(BindingDisplayId),
+            typeof(string),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(string.Empty, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty WorkspaceWindowBindingsProperty =
+        DependencyProperty.Register(
+            nameof(WorkspaceWindowBindings),
+            typeof(IEnumerable<WorkspaceWindowBinding>),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
     private readonly LayoutGeometryCalculator _geometryCalculator = new();
     private readonly SplitResizeService _splitResizeService = new();
+    private readonly Dictionary<string, ImageSource?> _iconCache = new(StringComparer.OrdinalIgnoreCase);
 
     private LayoutGeometryResult? _lastGeometry;
     private ComputedSplitter? _activeDragSplitter;
@@ -83,6 +128,7 @@ public sealed class EditorCanvasControl : FrameworkElement
     public event EventHandler<SplitterRatioChangedEventArgs>? SplitterRatioChanged;
     public event EventHandler<CanvasContextActionRequestedEventArgs>? CanvasContextActionRequested;
     public event EventHandler<SnapLayoutSwitchRequestedEventArgs>? SnapLayoutSwitchRequested;
+    public event EventHandler<WorkspaceProfileSwitchRequestedEventArgs>? WorkspaceProfileSwitchRequested;
 
     public LayoutDocument? Document
     {
@@ -114,6 +160,18 @@ public sealed class EditorCanvasControl : FrameworkElement
         set => SetValue(ActiveSnapLayoutIdProperty, value);
     }
 
+    public IEnumerable<LayoutListItemViewModel>? AvailableWorkspaceProfiles
+    {
+        get => (IEnumerable<LayoutListItemViewModel>?)GetValue(AvailableWorkspaceProfilesProperty);
+        set => SetValue(AvailableWorkspaceProfilesProperty, value);
+    }
+
+    public string ActiveWorkspaceProfileId
+    {
+        get => (string)GetValue(ActiveWorkspaceProfileIdProperty);
+        set => SetValue(ActiveWorkspaceProfileIdProperty, value);
+    }
+
     public PaneRect StageBounds
     {
         get => (PaneRect)GetValue(StageBoundsProperty);
@@ -124,6 +182,30 @@ public sealed class EditorCanvasControl : FrameworkElement
     {
         get => (IEnumerable<EditorReferenceLayout>?)GetValue(ReferenceLayoutsProperty);
         set => SetValue(ReferenceLayoutsProperty, value);
+    }
+
+    public bool IsLayoutEditingEnabled
+    {
+        get => (bool)GetValue(IsLayoutEditingEnabledProperty);
+        set => SetValue(IsLayoutEditingEnabledProperty, value);
+    }
+
+    public bool ShowWorkspaceBindingMarkers
+    {
+        get => (bool)GetValue(ShowWorkspaceBindingMarkersProperty);
+        set => SetValue(ShowWorkspaceBindingMarkersProperty, value);
+    }
+
+    public string BindingDisplayId
+    {
+        get => (string)GetValue(BindingDisplayIdProperty);
+        set => SetValue(BindingDisplayIdProperty, value);
+    }
+
+    public IEnumerable<WorkspaceWindowBinding>? WorkspaceWindowBindings
+    {
+        get => (IEnumerable<WorkspaceWindowBinding>?)GetValue(WorkspaceWindowBindingsProperty);
+        set => SetValue(WorkspaceWindowBindingsProperty, value);
     }
 
     protected override HitTestResult HitTestCore(PointHitTestParameters hitTestParameters)
@@ -165,7 +247,7 @@ public sealed class EditorCanvasControl : FrameworkElement
             }
             else if (isSelected)
             {
-                drawingContext.DrawRectangle(new SolidColorBrush(WpfColor.FromArgb(18, 255, 255, 255)), null, rect);
+                drawingContext.DrawRectangle(new SolidColorBrush(WpfColor.FromArgb(34, 84, 166, 255)), null, rect);
             }
 
             drawingContext.DrawRectangle(
@@ -175,9 +257,9 @@ public sealed class EditorCanvasControl : FrameworkElement
                         isPreview
                             ? WpfColor.FromRgb(74, 222, 128)
                             : isSelected
-                                ? WpfColor.FromRgb(255, 170, 96)
+                                ? WpfColor.FromRgb(84, 166, 255)
                                 : WpfColor.FromArgb(210, 255, 255, 255)),
-                    isPreview ? 3 : isSelected ? 2.2 : 1),
+                    isPreview ? 3.2 : isSelected ? 3 : 1),
                 rect);
         }
 
@@ -223,6 +305,8 @@ public sealed class EditorCanvasControl : FrameworkElement
                 new WpfPoint(splitter.HostBounds.X, y),
                 new WpfPoint(splitter.HostBounds.X + splitter.HostBounds.Width, y));
         }
+
+        DrawWorkspaceBindingMarkers(drawingContext);
 
         if (_snapGuideAxisPosition.HasValue && _snapGuideDirection.HasValue)
         {
@@ -324,7 +408,7 @@ public sealed class EditorCanvasControl : FrameworkElement
 
         var point = e.GetPosition(this);
         var splitter = _lastGeometry.Splitters.FirstOrDefault(item => IsOnSplitter(item, point));
-        if (splitter is not null)
+        if (splitter is not null && IsLayoutEditingEnabled)
         {
             _activeDragSplitter = splitter;
             CaptureMouse();
@@ -354,6 +438,11 @@ public sealed class EditorCanvasControl : FrameworkElement
         if (splitter is not null)
         {
             NodeSelected?.Invoke(this, new NodeSelectedEventArgs(splitter.SplitNodeId));
+            if (!IsLayoutEditingEnabled)
+            {
+                return;
+            }
+
             OpenContextMenu(splitter.SplitNodeId, includeSplitActions: false, includeDelete: true);
             return;
         }
@@ -365,6 +454,11 @@ public sealed class EditorCanvasControl : FrameworkElement
         }
 
         NodeSelected?.Invoke(this, new NodeSelectedEventArgs(region.NodeId));
+        if (!IsLayoutEditingEnabled)
+        {
+            return;
+        }
+
         var includeDelete = Document?.Root.Id != region.NodeId;
         OpenContextMenu(region.NodeId, includeSplitActions: true, includeDelete: includeDelete);
     }
@@ -380,6 +474,12 @@ public sealed class EditorCanvasControl : FrameworkElement
         }
 
         var point = e.GetPosition(this);
+
+        if (!IsLayoutEditingEnabled)
+        {
+            Cursor = WpfCursors.Arrow;
+            return;
+        }
 
         if (_activeDragSplitter is not null && IsMouseCaptured)
         {
@@ -487,6 +587,7 @@ public sealed class EditorCanvasControl : FrameworkElement
         }
 
         AppendSnapLayoutMenu(menu);
+        AppendWorkspaceProfileMenu(menu);
 
         if (menu.Items.Count == 0)
         {
@@ -512,7 +613,7 @@ public sealed class EditorCanvasControl : FrameworkElement
 
         var layoutMenu = new MenuItem
         {
-            Header = "快速切换吸附布局"
+            Header = "切换吸附布局"
         };
 
         foreach (var layout in layouts)
@@ -536,6 +637,45 @@ public sealed class EditorCanvasControl : FrameworkElement
         menu.Items.Add(layoutMenu);
     }
 
+    private void AppendWorkspaceProfileMenu(ContextMenu menu)
+    {
+        var profiles = AvailableWorkspaceProfiles?.ToList();
+        if (profiles is null || profiles.Count == 0)
+        {
+            return;
+        }
+
+        if (menu.Items.Count > 0)
+        {
+            menu.Items.Add(new Separator());
+        }
+
+        var profileMenu = new MenuItem
+        {
+            Header = "切换并应用工作区方案"
+        };
+
+        foreach (var profile in profiles)
+        {
+            var profileItem = new MenuItem
+            {
+                Header = profile.Name,
+                IsCheckable = true,
+                IsChecked = string.Equals(profile.Id, ActiveWorkspaceProfileId, StringComparison.OrdinalIgnoreCase),
+                ToolTip = profile.Description
+            };
+
+            profileItem.Click += (_, _) =>
+            {
+                WorkspaceProfileSwitchRequested?.Invoke(this, new WorkspaceProfileSwitchRequestedEventArgs(profile.Id));
+            };
+
+            profileMenu.Items.Add(profileItem);
+        }
+
+        menu.Items.Add(profileMenu);
+    }
+
     private MenuItem CreateMenuItem(string header, CanvasContextAction action, string targetNodeId)
     {
         var item = new MenuItem
@@ -549,6 +689,156 @@ public sealed class EditorCanvasControl : FrameworkElement
         };
 
         return item;
+    }
+
+    private void DrawWorkspaceBindingMarkers(DrawingContext drawingContext)
+    {
+        if (!ShowWorkspaceBindingMarkers || _lastGeometry is null)
+        {
+            return;
+        }
+
+        var bindings = WorkspaceWindowBindings?.ToList();
+        if (bindings is null || bindings.Count == 0)
+        {
+            return;
+        }
+
+        var currentDisplayId = BindingDisplayId ?? string.Empty;
+        foreach (var region in _lastGeometry.Regions)
+        {
+            var regionBindings = bindings
+                .Where(item =>
+                    string.Equals(item.DisplayId, currentDisplayId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.NodeId, region.NodeId, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(item => item.StackOrder)
+                .ToList();
+            if (regionBindings.Count == 0)
+            {
+                continue;
+            }
+
+            DrawBindingMarker(drawingContext, region.Bounds, regionBindings);
+        }
+    }
+
+    private void DrawBindingMarker(DrawingContext drawingContext, PaneRect regionBounds, IReadOnlyList<WorkspaceWindowBinding> bindings)
+    {
+        const double markerSize = 58;
+        var centerX = regionBounds.X + (regionBounds.Width / 2);
+        var centerY = regionBounds.Y + (regionBounds.Height / 2);
+        var markerRect = new Rect(centerX - (markerSize / 2), centerY - (markerSize / 2), markerSize, markerSize);
+        var background = new SolidColorBrush(WpfColor.FromArgb(220, 16, 22, 37));
+        var stroke = new WpfPen(new SolidColorBrush(WpfColor.FromArgb(210, 159, 199, 255)), 1.2);
+        drawingContext.DrawRoundedRectangle(background, stroke, markerRect, 16, 16);
+
+        var visibleBindings = bindings
+            .OrderBy(item => item.StackOrder)
+            .TakeLast(3)
+            .ToList();
+        for (var index = 0; index < visibleBindings.Count; index++)
+        {
+            var itemBinding = visibleBindings[index];
+            var iconRect = visibleBindings.Count == 1
+                ? new Rect(markerRect.X + 13, markerRect.Y + 8, 32, 32)
+                : new Rect(markerRect.X + 8 + (index * 7), markerRect.Y + 7 + (index * 4), 28, 28);
+            var icon = TryGetIcon(itemBinding);
+            if (icon is not null)
+            {
+                drawingContext.DrawImage(icon, iconRect);
+            }
+            else
+            {
+                var glyph = string.IsNullOrWhiteSpace(itemBinding.ProcessName)
+                    ? "?"
+                    : itemBinding.ProcessName.Trim()[0].ToString().ToUpperInvariant();
+                var formatted = CreateFormattedText(glyph, 18, System.Windows.Media.Brushes.White, FontWeights.Bold);
+                drawingContext.DrawText(
+                    formatted,
+                    new WpfPoint(
+                        iconRect.X + ((iconRect.Width - formatted.Width) / 2),
+                        iconRect.Y + 3));
+            }
+        }
+
+        if (bindings.Count > 1)
+        {
+            var countLabel = CreateFormattedText($"+{bindings.Count - 1}", 10, System.Windows.Media.Brushes.White, FontWeights.Bold);
+            drawingContext.DrawText(
+                countLabel,
+                new WpfPoint(
+                    markerRect.Right - countLabel.Width - 6,
+                    markerRect.Y + 5));
+        }
+
+        var binding = bindings.OrderBy(item => item.StackOrder).Last();
+        var label = NormalizeProcessLabel(binding.ProcessName);
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            var formattedLabel = CreateFormattedText(label, 9.5, new SolidColorBrush(WpfColor.FromRgb(207, 231, 255)), FontWeights.SemiBold);
+            drawingContext.DrawText(
+                formattedLabel,
+                new WpfPoint(
+                    markerRect.X + ((markerRect.Width - formattedLabel.Width) / 2),
+                    markerRect.Bottom - 14));
+        }
+    }
+
+    private ImageSource? TryGetIcon(WorkspaceWindowBinding binding)
+    {
+        var path = binding.ExecutablePath?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
+        {
+            return null;
+        }
+
+        if (_iconCache.TryGetValue(path, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            using var icon = System.Drawing.Icon.ExtractAssociatedIcon(path);
+            if (icon is null)
+            {
+                _iconCache[path] = null;
+                return null;
+            }
+
+            var source = Imaging.CreateBitmapSourceFromHIcon(
+                icon.Handle,
+                Int32Rect.Empty,
+                BitmapSizeOptions.FromWidthAndHeight(32, 32));
+            source.Freeze();
+            _iconCache[path] = source;
+            return source;
+        }
+        catch
+        {
+            _iconCache[path] = null;
+            return null;
+        }
+    }
+
+    private static string NormalizeProcessLabel(string processName)
+    {
+        var label = processName.Trim();
+        return label.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? label[..^4]
+            : label;
+    }
+
+    private FormattedText CreateFormattedText(string text, double size, System.Windows.Media.Brush brush, FontWeight weight)
+    {
+        return new FormattedText(
+            text,
+            System.Globalization.CultureInfo.CurrentUICulture,
+            System.Windows.FlowDirection.LeftToRight,
+            new Typeface(new System.Windows.Media.FontFamily("Microsoft YaHei UI"), FontStyles.Normal, weight, FontStretches.Normal),
+            size,
+            brush,
+            VisualTreeHelper.GetDpi(this).PixelsPerDip);
     }
 
     private void EndDrag()

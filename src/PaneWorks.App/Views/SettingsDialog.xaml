@@ -10,10 +10,13 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Background="#FF131A28"
+        TextElement.Foreground="{StaticResource PaneTextBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <Grid Margin="24">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="18" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="18" />
                 <RowDefinition Height="Auto" />
@@ -27,10 +30,11 @@
             <StackPanel>
                 <TextBlock FontSize="28"
                            FontWeight="Bold"
+                           Foreground="{StaticResource PaneTextBrush}"
                            Text="设置" />
                 <TextBlock Margin="0,8,0,0"
                            Foreground="#CFE7FF"
-                           Text="自定义吸附触发键、最小化快捷键，以及开机启动行为。点击“开始录制”后直接按下你想要的快捷键组合。"
+                           Text="自定义用户分区吸附键、临时调整区吸附键、收进托盘快捷键，以及开机启动行为。点击“开始录制”后直接按下你想要的快捷键组合。"
                            TextWrapping="Wrap" />
             </StackPanel>
 
@@ -38,7 +42,7 @@
                 <TextBlock Margin="0,0,0,8"
                            FontSize="14"
                            Foreground="#B8D8FF"
-                           Text="吸附触发键" />
+                           Text="用户分区吸附键" />
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -61,7 +65,30 @@
                 <TextBlock Margin="0,0,0,8"
                            FontSize="14"
                            Foreground="#B8D8FF"
-                           Text="最小化快捷键" />
+                           Text="临时调整区吸附键" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="150" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBox x:Name="RuntimeSessionShortcutTextBox"
+                             Margin="0,0,14,0"
+                             IsReadOnly="True"
+                             FontSize="16"
+                             Text="Ctrl + Shift" />
+                    <Button Grid.Column="1"
+                            x:Name="RecordRuntimeSessionShortcutButton"
+                            Click="RecordRuntimeSessionShortcutButton_Click"
+                            Content="开始录制" />
+                </Grid>
+            </StackPanel>
+
+            <StackPanel Grid.Row="6">
+                <TextBlock Margin="0,0,0,8"
+                           FontSize="14"
+                           Foreground="#B8D8FF"
+                           Text="收进托盘快捷键" />
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -80,7 +107,7 @@
                 </Grid>
             </StackPanel>
 
-            <Border Grid.Row="6"
+            <Border Grid.Row="8"
                     Padding="18"
                     Margin="0,10,0,0"
                     Background="#90101625"
@@ -93,12 +120,12 @@
                     <TextBlock x:Name="RecordingHintTextBlock"
                                Margin="0,14,0,0"
                                Foreground="#CFE7FF"
-                               Text="说明：吸附触发键支持单独的 Shift、Ctrl、Alt，也支持 Ctrl + Alt + A 这类组合。最小化快捷键同样支持完全自定义。"
+                               Text="说明：用户分区吸附键默认是 Shift；临时调整区吸附键默认是 Ctrl + Shift。两个快捷键都支持完全自定义。"
                                TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
-            <Grid Grid.Row="7"
+            <Grid Grid.Row="9"
                   Margin="0,20,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

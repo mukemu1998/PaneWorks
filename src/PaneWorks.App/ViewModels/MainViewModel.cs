@@ -1,7 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Interop;
 using PaneWorks.App.Controls;
 using PaneWorks.App.Diagnostics;
 using PaneWorks.App.Views;
@@ -15,7 +14,7 @@ using WpfMessageBox = System.Windows.MessageBox;
 
 namespace PaneWorks.App.ViewModels;
 
-public sealed class MainViewModel : ObservableObject
+public sealed partial class MainViewModel : ObservableObject
 {
     private const string DefaultBlankWorkspaceName = "起始空白布局";
     private readonly LayoutEditorService _editorService = new();
@@ -25,9 +24,14 @@ public sealed class MainViewModel : ObservableObject
     private readonly JsonAppSettingsRepository _appSettingsRepository;
     private readonly JsonSessionStateRepository _sessionStateRepository;
     private readonly StartupRegistrationService _startupRegistrationService = new();
-    private readonly WorkspaceApplyService _workspaceApplyService = new();
+    private readonly RelayCommand _newLayoutCommand;
     private readonly RelayCommand _undoCommand;
     private readonly RelayCommand _redoCommand;
+    private readonly RelayCommand _saveLayoutCommand;
+    private readonly RelayCommand _saveAsLayoutCommand;
+    private readonly RelayCommand _editActiveSnapLayoutCommand;
+    private readonly RelayCommand _loadSelectedLayoutCommand;
+    private readonly RelayCommand _exitLayoutEditModeCommand;
     private readonly Stack<EditorHistoryState> _undoStack = new();
     private readonly Stack<EditorHistoryState> _redoStack = new();
     private readonly Dictionary<string, DisplayInfo> _displaysById = new(StringComparer.OrdinalIgnoreCase);
@@ -46,16 +50,22 @@ public sealed class MainViewModel : ObservableObject
     private bool _isDirty;
     private bool _suppressDisplaySelectionChange;
     private bool _isSavingLayout;
+    private bool _isLayoutEditMode;
+    private bool _isWorkspaceBindingMode;
     private string _lastStatusMessage = string.Empty;
 
     public MainViewModel()
     {
         _layoutRepository = new JsonLayoutRepository(LayoutStoragePaths.GetDefaultLayoutsDirectory());
+        _workspaceProfileRepository = new JsonWorkspaceProfileRepository(
+            LayoutStoragePaths.GetDefaultWorkspaceProfilesDirectory(),
+            LayoutStoragePaths.GetDefaultLayoutsDirectory());
         _appSettingsRepository = new JsonAppSettingsRepository(LayoutStoragePaths.GetDefaultAppSettingsFilePath());
         _sessionStateRepository = new JsonSessionStateRepository(LayoutStoragePaths.GetDefaultSessionStateFilePath());
         _appSettings = LoadAppSettings();
 
         Layouts = new ObservableCollection<LayoutListItemViewModel>();
+        WorkspaceProfiles = new ObservableCollection<LayoutListItemViewModel>();
         Displays = new ObservableCollection<DisplayItemViewModel>();
 
         RefreshDisplays();
@@ -67,24 +77,33 @@ public sealed class MainViewModel : ObservableObject
         _selectedNodeId = _currentDocument.Root.Id;
         _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
 
-        _undoCommand = new RelayCommand(Undo, () => _undoStack.Count > 0);
-        _redoCommand = new RelayCommand(Redo, () => _redoStack.Count > 0);
+        _undoCommand = new RelayCommand(Undo, () => IsLayoutEditMode && _undoStack.Count > 0);
+        _redoCommand = new RelayCommand(Redo, () => IsLayoutEditMode && _redoStack.Count > 0);
 
-        NewLayoutCommand = new RelayCommand(CreateNewLayout);
+        _newLayoutCommand = new RelayCommand(CreateNewLayout);
         UndoCommand = _undoCommand;
         RedoCommand = _redoCommand;
-        ApplyLayoutCommand = new RelayCommand(ApplyCurrentLayoutToWindows);
-        SaveLayoutCommand = new RelayCommand(SaveCurrentLayout);
-        SaveAsLayoutCommand = new RelayCommand(SaveCurrentLayoutAs);
+        _saveLayoutCommand = new RelayCommand(SaveCurrentLayout, () => IsLayoutEditMode);
+        _saveAsLayoutCommand = new RelayCommand(SaveCurrentLayoutAs, () => IsLayoutEditMode);
+        _editActiveSnapLayoutCommand = new RelayCommand(EditActiveSnapLayout);
+        _loadSelectedLayoutCommand = new RelayCommand(LoadSelectedLayout, () => SelectedLayoutItem is not null);
+        _exitLayoutEditModeCommand = new RelayCommand(ExitLayoutEditMode, () => IsLayoutEditMode);
+        NewLayoutCommand = _newLayoutCommand;
+        SaveLayoutCommand = _saveLayoutCommand;
+        SaveAsLayoutCommand = _saveAsLayoutCommand;
+        EditActiveSnapLayoutCommand = _editActiveSnapLayoutCommand;
+        LoadSelectedLayoutCommand = _loadSelectedLayoutCommand;
+        ExitLayoutEditModeCommand = _exitLayoutEditModeCommand;
         SetSelectedLayoutAsSnapLayoutCommand = new RelayCommand(SetSelectedLayoutAsSnapLayout, () => SelectedLayoutItem is not null);
-        LoadSelectedLayoutCommand = new RelayCommand(LoadSelectedLayout);
         DeleteSelectedLayoutCommand = new RelayCommand(DeleteSelectedLayout);
-        SplitHorizontalCommand = new RelayCommand(() => SplitLeafById(SelectedNodeId, SplitDirection.Horizontal));
-        SplitVerticalCommand = new RelayCommand(() => SplitLeafById(SelectedNodeId, SplitDirection.Vertical));
-        DeleteSelectedSplitCommand = new RelayCommand(() => DeleteContainingSplit(SelectedNodeId));
+        SplitHorizontalCommand = new RelayCommand(() => SplitLeafById(SelectedNodeId, SplitDirection.Horizontal), () => IsLayoutEditMode);
+        SplitVerticalCommand = new RelayCommand(() => SplitLeafById(SelectedNodeId, SplitDirection.Vertical), () => IsLayoutEditMode);
+        DeleteSelectedSplitCommand = new RelayCommand(() => DeleteContainingSplit(SelectedNodeId), () => IsLayoutEditMode);
+        InitializeWorkspaceProfileCommands();
 
         RefreshDisplays();
         RefreshLayouts();
+        RefreshWorkspaceProfiles();
         TryRestoreLastLayoutOnStartup();
     }
 
@@ -98,11 +117,13 @@ public sealed class MainViewModel : ObservableObject
 
     public ICommand RedoCommand { get; }
 
-    public ICommand ApplyLayoutCommand { get; }
-
     public ICommand SaveLayoutCommand { get; }
 
     public ICommand SaveAsLayoutCommand { get; }
+
+    public ICommand EditActiveSnapLayoutCommand { get; }
+
+    public ICommand ExitLayoutEditModeCommand { get; }
 
     public ICommand SetSelectedLayoutAsSnapLayoutCommand { get; }
 
@@ -147,6 +168,7 @@ public sealed class MainViewModel : ObservableObject
             _currentWorkspaceDocument = RenameWorkspace(_currentWorkspaceDocument, normalized);
             SyncActiveSnapWithCurrentWorkspaceIfNeeded();
             CurrentDocument = GetDisplayLayout(_currentWorkspaceDocument, SelectedDisplayItem?.Id);
+            RaisePropertyChanged(nameof(DisplayedLayoutName));
             UpdateDirtyState();
             UpdateHistoryCommandStates();
         }
@@ -170,9 +192,20 @@ public sealed class MainViewModel : ObservableObject
         get => _selectedLayoutItem;
         set
         {
-            if (SetProperty(ref _selectedLayoutItem, value) && SetSelectedLayoutAsSnapLayoutCommand is RelayCommand command)
+            if (!SetProperty(ref _selectedLayoutItem, value))
             {
-                command.RaiseCanExecuteChanged();
+                return;
+            }
+
+            if (SetSelectedLayoutAsSnapLayoutCommand is RelayCommand snapCommand)
+            {
+                snapCommand.RaiseCanExecuteChanged();
+            }
+
+            _loadSelectedLayoutCommand.RaiseCanExecuteChanged();
+            if (NewWorkspaceProfileCommand is RelayCommand createWorkspaceFromSelectedCommand)
+            {
+                createWorkspaceFromSelectedCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -219,11 +252,84 @@ public sealed class MainViewModel : ObservableObject
 
     public string DirtyLabel => IsDirty ? "未保存修改" : "已保存";
 
+    public bool IsLayoutEditMode
+    {
+        get => _isLayoutEditMode;
+        private set
+        {
+            if (!SetProperty(ref _isLayoutEditMode, value))
+            {
+                return;
+            }
+
+            RaisePropertyChanged(nameof(IsDesktopOverlayVisible));
+            RaisePropertyChanged(nameof(DesktopOverlayVisibility));
+            RaisePropertyChanged(nameof(DisplayedLayoutName));
+            RaisePropertyChanged(nameof(LayoutEditModeLabel));
+            RaisePropertyChanged(nameof(LayoutEditModeHint));
+            RaisePropertyChanged(nameof(IsLayoutNameEditable));
+            RaisePropertyChanged(nameof(IsLayoutNameReadOnly));
+            UpdateLayoutCommandStates();
+        }
+    }
+
+    public bool IsWorkspaceBindingMode
+    {
+        get => _isWorkspaceBindingMode;
+        private set
+        {
+            if (!SetProperty(ref _isWorkspaceBindingMode, value))
+            {
+                return;
+            }
+
+            RaisePropertyChanged(nameof(IsDesktopOverlayVisible));
+            RaisePropertyChanged(nameof(DesktopOverlayVisibility));
+            RaisePropertyChanged(nameof(WorkspaceBindingModeLabel));
+            RaisePropertyChanged(nameof(CanEditWorkspaceBindings));
+            RaiseWindowBindingStatusChanged();
+            UpdateWorkspaceBindingCommandStates();
+        }
+    }
+
+    public bool IsDesktopOverlayVisible => IsLayoutEditMode || IsWorkspaceBindingMode;
+
+    public Visibility DesktopOverlayVisibility => IsDesktopOverlayVisible ? Visibility.Visible : Visibility.Collapsed;
+
+    public bool IsLayoutNameEditable => IsLayoutEditMode;
+
+    public bool IsLayoutNameReadOnly => !IsLayoutNameEditable;
+
+    public string DisplayedLayoutName
+    {
+        get => IsLayoutEditMode ? CurrentLayoutName : ActiveSnapLayoutName;
+        set
+        {
+            if (IsLayoutEditMode)
+            {
+                CurrentLayoutName = value;
+                RaisePropertyChanged();
+            }
+        }
+    }
+
+    public string LayoutEditModeLabel => IsLayoutEditMode ? "正在编辑分区" : "当前为选择模式";
+
+    public string LayoutEditModeHint => IsLayoutEditMode
+        ? "已进入分区编辑：可在桌面覆盖层右键创建分割线、拖动调整比例、右键删除分割。完成后保存或退出编辑。"
+        : "主菜单默认只选择吸附布局；需要修改分割线时，先点击“新建分区”“编辑当前选择”或列表里的“打开编辑”，进入编辑后再操作桌面分区。";
+
+    public string WorkspaceBindingModeLabel => IsWorkspaceBindingMode ? "正在选择绑定区域" : "未进入绑定模式";
+
+    public bool CanEditWorkspaceBindings => IsWorkspaceBindingMode && IsWorkspaceProfileEnabled;
+
     public string ActiveSnapLayoutName => _activeSnapLayoutName;
 
     public string ActiveSnapLayoutId => _activeSnapLayoutId ?? string.Empty;
 
     public string SnapModifierKey => _appSettings.SnapModifierKey;
+
+    public string RuntimeSessionModifierKey => _appSettings.RuntimeSessionModifierKey;
 
     public string MinimizeShortcut => _appSettings.MinimizeShortcut;
 
@@ -235,8 +341,8 @@ public sealed class MainViewModel : ObservableObject
     {
         get
         {
-            var fileLabel = _currentLayoutId is null ? "当前是临时多屏草稿" : $"当前文件：{_currentLayoutId}.json";
-            return $"编辑屏幕：{CurrentDisplayName}  |  {fileLabel}  |  同一个布局文件会同时保存所有屏幕的分割结果。";
+            var fileLabel = _currentLayoutId is null ? "当前是临时多屏草稿" : $"当前分区文件：{_currentLayoutId}.json";
+            return $"编辑屏幕：{CurrentDisplayName}  |  {fileLabel}  |  同一个分区布局文件会同时保存所有屏幕的分割结果。";
         }
     }
 
@@ -248,46 +354,19 @@ public sealed class MainViewModel : ObservableObject
     {
         get
         {
-            var idLabel = string.IsNullOrWhiteSpace(_activeSnapLayoutId) ? "未绑定到已保存布局" : $"{_activeSnapLayoutId}.json";
-            return $"当前吸附布局：{_activeSnapLayoutName}  |  {idLabel}  |  会在所有屏幕统一生效";
+            var idLabel = string.IsNullOrWhiteSpace(_activeSnapLayoutId) ? "未绑定到已保存分区布局" : $"{_activeSnapLayoutId}.json";
+            return $"当前分区布局：{_activeSnapLayoutName}  |  {idLabel}  |  会在所有屏幕统一生效";
         }
     }
 
     public string SelectedRegionBindingSummary
     {
-        get
-        {
-            if (!TryGetSelectedLeafRegion(out var displayId, out var nodeId))
-            {
-                return "当前还没有选中可绑定的区域。";
-            }
-
-            var binding = GetWindowBinding(_currentWorkspaceDocument, displayId, nodeId);
-            return binding is null
-                ? "当前区域还没有窗口绑定。"
-                : $"当前区域绑定：{binding.ProcessName}.exe";
-        }
+        get => BuildSelectedRegionBindingSummary();
     }
 
     public string SelectedRegionBindingDescription
     {
-        get
-        {
-            if (!TryGetSelectedLeafRegion(out var displayId, out var nodeId))
-            {
-                return "先点击一个区域，再选择要绑定的窗口。第一版会按进程名恢复窗口，并优先参考绑定时记录的标题。";
-            }
-
-            var binding = GetWindowBinding(_currentWorkspaceDocument, displayId, nodeId);
-            if (binding is null)
-            {
-                return "绑定写入当前编辑布局。后续切换到这套吸附布局或重新打开工具时，可以恢复已绑定窗口。";
-            }
-
-            return string.IsNullOrWhiteSpace(binding.WindowTitleSnapshot)
-                ? $"恢复匹配会按 {binding.ProcessName}.exe 处理。"
-                : $"标题快照：{binding.WindowTitleSnapshot}";
-        }
+        get => BuildSelectedRegionBindingDescription();
     }
 
     public string SelectionLabel
@@ -319,8 +398,9 @@ public sealed class MainViewModel : ObservableObject
         {
             var startupLabel = _appSettings.LaunchAtStartup ? "已开启" : "未开启";
             var snapLabel = ShortcutGestureHelper.ToDisplayString(_appSettings.SnapModifierKey, "Shift");
+            var runtimeLabel = ShortcutGestureHelper.ToDisplayString(_appSettings.RuntimeSessionModifierKey, "Ctrl + Shift");
             var minimizeLabel = ShortcutGestureHelper.ToDisplayString(_appSettings.MinimizeShortcut, "Esc");
-            return $"吸附触发键：{snapLabel}  |  最小化快捷键：{minimizeLabel}  |  开机自启：{startupLabel}";
+            return $"拖动目标窗口时按住：用户分区吸附 {snapLabel}  |  临时调整区吸附 {runtimeLabel}  |  托盘：{minimizeLabel}  |  开机自启：{startupLabel}";
         }
     }
 
@@ -340,69 +420,29 @@ public sealed class MainViewModel : ObservableObject
             && _queryService.IsLeaf(CurrentDocument, nodeId);
     }
 
+    public bool TrySetSelectedRegionWindowBinding(
+        string processName,
+        string windowTitleSnapshot,
+        string executablePath,
+        string explorerFolderPath,
+        out string message)
+        => TrySetSelectedRegionWindowBindingCore(
+            processName,
+            windowTitleSnapshot,
+            executablePath,
+            explorerFolderPath,
+            out message);
+
     public bool TrySetSelectedRegionWindowBinding(string processName, string windowTitleSnapshot, out string message)
-    {
-        message = string.Empty;
-        if (!TryGetSelectedLeafRegion(out var displayId, out var nodeId))
-        {
-            message = "请先选中一个区域，再给它绑定窗口。";
-            return false;
-        }
-
-        var normalizedProcessName = processName.Trim();
-        if (string.IsNullOrWhiteSpace(normalizedProcessName))
-        {
-            message = "无效的窗口进程名，无法保存绑定。";
-            return false;
-        }
-
-        PushUndoState();
-        _redoStack.Clear();
-        _currentWorkspaceDocument = UpsertWindowBinding(
-            _currentWorkspaceDocument,
-            new WorkspaceWindowBinding(
-                displayId,
-                nodeId,
-                normalizedProcessName,
-                windowTitleSnapshot.Trim()));
-        SyncActiveSnapWithCurrentWorkspaceIfNeeded();
-        UpdateDirtyState();
-        UpdateHistoryCommandStates();
-        RaiseWindowBindingStatusChanged();
-        message = $"当前区域已绑定到 {normalizedProcessName}.exe。";
-        return true;
-    }
+        => TrySetSelectedRegionWindowBindingCore(
+            processName,
+            windowTitleSnapshot,
+            string.Empty,
+            string.Empty,
+            out message);
 
     public bool TryClearSelectedRegionWindowBinding(out string message)
-    {
-        message = string.Empty;
-        if (!TryGetSelectedLeafRegion(out var displayId, out var nodeId))
-        {
-            message = "请先选中一个区域，再清除绑定。";
-            return false;
-        }
-
-        if (GetWindowBinding(_currentWorkspaceDocument, displayId, nodeId) is null)
-        {
-            message = "当前区域还没有窗口绑定。";
-            return false;
-        }
-
-        PushUndoState();
-        _redoStack.Clear();
-        _currentWorkspaceDocument = RemoveWindowBinding(_currentWorkspaceDocument, displayId, nodeId);
-        SyncActiveSnapWithCurrentWorkspaceIfNeeded();
-        UpdateDirtyState();
-        UpdateHistoryCommandStates();
-        RaiseWindowBindingStatusChanged();
-        message = "当前区域的窗口绑定已清除。";
-        return true;
-    }
-
-    public IReadOnlyList<WorkspaceWindowBinding> GetActiveSnapWindowBindings()
-    {
-        return NormalizeWindowBindings(_activeSnapWorkspaceDocument.WindowBindings);
-    }
+        => TryClearSelectedRegionWindowBindingCore(out message);
 
     public DisplayInfo GetSelectedDisplay()
     {
@@ -440,6 +480,11 @@ public sealed class MainViewModel : ObservableObject
 
     public void UpdateSplitRatio(string splitNodeId, double ratio)
     {
+        if (!IsLayoutEditMode)
+        {
+            return;
+        }
+
         var result = _editorService.UpdateSplitRatio(CurrentDocument, splitNodeId, ratio);
         if (!result.Changed)
         {
@@ -521,10 +566,6 @@ public sealed class MainViewModel : ObservableObject
             .GetResult();
     }
 
-    public void ResetSnapLayoutPreview()
-    {
-    }
-
     public void OpenSettings()
     {
         var dialog = new SettingsDialog(_appSettings);
@@ -543,6 +584,7 @@ public sealed class MainViewModel : ObservableObject
 
         var updatedSettings = NormalizeAppSettings(new AppSettings(
             dialog.Result.SnapModifierKey,
+            dialog.Result.RuntimeSessionModifierKey,
             dialog.Result.MinimizeShortcut,
             dialog.Result.LaunchAtStartup));
 
@@ -556,6 +598,7 @@ public sealed class MainViewModel : ObservableObject
 
             _appSettingsRepository.Save(_appSettings);
             RaisePropertyChanged(nameof(SnapModifierKey));
+            RaisePropertyChanged(nameof(RuntimeSessionModifierKey));
             RaisePropertyChanged(nameof(MinimizeShortcut));
             RaisePropertyChanged(nameof(ShortcutSummary));
             ShowInfoMessage("设置已保存，新的快捷键和开机自启状态已经生效。");
@@ -578,6 +621,12 @@ public sealed class MainViewModel : ObservableObject
 
     public void HandleCanvasContextAction(CanvasContextAction action, string targetNodeId)
     {
+        if (!IsLayoutEditMode)
+        {
+            SelectNode(targetNodeId);
+            return;
+        }
+
         SelectNode(targetNodeId);
 
         switch (action)
@@ -607,7 +656,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void CreateNewLayout()
     {
-        if (!ResolvePendingChanges("新建布局"))
+        if (!ResolvePendingChanges("新建分区布局"))
         {
             return;
         }
@@ -616,6 +665,7 @@ public sealed class MainViewModel : ObservableObject
         _currentLayoutId = null;
         _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
         IsDirty = false;
+        EnterLayoutEditMode("已进入新建分区编辑模式。");
         ResetHistory();
         SyncActiveSnapWithCurrentWorkspaceIfNeeded();
         ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: false);
@@ -624,14 +674,14 @@ public sealed class MainViewModel : ObservableObject
 
     private async void SaveCurrentLayout()
     {
-        if (_isSavingLayout)
+        if (_isSavingLayout || !IsLayoutEditMode)
         {
             return;
         }
 
         var targetId = Slugify(CurrentLayoutName);
         _isSavingLayout = true;
-        SetStatusMessage("正在保存布局...");
+        SetStatusMessage("正在保存分区布局...");
 
         try
         {
@@ -643,37 +693,14 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private void ApplyCurrentLayoutToWindows()
-    {
-        try
-        {
-            var owner = GetOwnerWindow();
-            var excludedHandle = owner is null ? IntPtr.Zero : new WindowInteropHelper(owner).Handle;
-            var targetDisplay = GetSelectedDisplay();
-            var result = _workspaceApplyService.Apply(CurrentDocument, targetDisplay.WorkArea, excludedHandle);
-
-            if (result.AppliedWindowCount == 0)
-            {
-                ShowInfoMessage("没有找到可排列的桌面窗口。请先打开几个普通应用窗口再试。");
-                return;
-            }
-
-            ShowInfoMessage($"已按 {targetDisplay.Name} 当前布局排列 {result.AppliedWindowCount} 个窗口。多屏整包保存已经生效，应用按钮仍按当前屏幕单独测试。");
-        }
-        catch (Exception ex)
-        {
-            ShowErrorMessage($"应用布局失败：{ex.Message}");
-        }
-    }
-
     private async void SaveCurrentLayoutAs()
     {
-        if (_isSavingLayout)
+        if (_isSavingLayout || !IsLayoutEditMode)
         {
             return;
         }
 
-        var enteredName = PromptForLayoutName("布局另存为", "请输入新布局名称。", CurrentLayoutName);
+        var enteredName = PromptForLayoutName("分区布局另存为", "请输入新分区布局名称。", CurrentLayoutName);
         if (enteredName is null)
         {
             return;
@@ -682,7 +709,7 @@ public sealed class MainViewModel : ObservableObject
         var targetName = NormalizeLayoutName(enteredName);
         var targetId = Slugify(targetName);
         _isSavingLayout = true;
-        SetStatusMessage("正在另存布局...");
+        SetStatusMessage("正在另存分区布局...");
 
         try
         {
@@ -711,7 +738,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        if (!ResolvePendingChanges("打开选中的布局"))
+        if (!ResolvePendingChanges("打开选中的分区布局"))
         {
             return;
         }
@@ -728,6 +755,7 @@ public sealed class MainViewModel : ObservableObject
             _currentLayoutId = SelectedLayoutItem.Id;
             _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
             IsDirty = false;
+            EnterLayoutEditMode($"正在编辑分区布局“{workspace.Name}”。");
             ResetHistory();
             SyncActiveSnapWithCurrentWorkspaceIfNeeded();
             ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: false);
@@ -735,8 +763,70 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            ShowErrorMessage($"打开布局失败：{ex.Message}");
+            ShowErrorMessage($"打开分区布局失败：{ex.Message}");
         }
+    }
+
+    private void EditActiveSnapLayout()
+    {
+        if (!ResolvePendingChanges("编辑当前吸附选择"))
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_activeSnapLayoutId))
+        {
+            try
+            {
+                _currentWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(
+                    _layoutRepository
+                        .LoadAsync(_activeSnapLayoutId, CancellationToken.None)
+                        .GetAwaiter()
+                        .GetResult());
+                _currentLayoutId = _activeSnapLayoutId;
+            }
+            catch (Exception ex)
+            {
+                ShowErrorMessage($"打开当前吸附分区失败：{ex.Message}");
+                return;
+            }
+        }
+        else
+        {
+            _currentWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(_activeSnapWorkspaceDocument);
+            _currentLayoutId = null;
+        }
+
+        _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
+        IsDirty = false;
+        EnterLayoutEditMode($"正在编辑当前吸附选择“{_currentWorkspaceDocument.Name}”。");
+        ResetHistory();
+        ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: false);
+        SaveSessionState();
+    }
+
+    private void ExitLayoutEditMode()
+    {
+        if (!ResolvePendingChanges("退出分区编辑"))
+        {
+            return;
+        }
+
+        IsLayoutEditMode = false;
+        SelectedLayoutItem = null;
+        SelectedNodeId = null;
+        SetStatusMessage("已退出分区编辑模式");
+    }
+
+    private void EnterLayoutEditMode(string statusMessage)
+    {
+        if (IsWorkspaceBindingMode)
+        {
+            IsWorkspaceBindingMode = false;
+        }
+
+        IsLayoutEditMode = true;
+        SetStatusMessage(statusMessage);
     }
 
     private void DeleteSelectedLayout()
@@ -747,7 +837,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         var deletedLayoutId = SelectedLayoutItem.Id;
-        var confirmed = ShowMessage($"确定删除布局“{SelectedLayoutItem.Name}”吗？", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        var confirmed = ShowMessage($"确定删除分区布局“{SelectedLayoutItem.Name}”吗？", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (confirmed != MessageBoxResult.Yes)
         {
             return;
@@ -776,16 +866,23 @@ public sealed class MainViewModel : ObservableObject
             }
 
             RefreshLayouts();
+            HandleLayoutDeletedForWorkspaceProfiles(deletedLayoutId);
+            RefreshWorkspaceProfiles();
             SaveSessionState();
         }
         catch (Exception ex)
         {
-            ShowErrorMessage($"删除布局失败：{ex.Message}");
+            ShowErrorMessage($"删除分区布局失败：{ex.Message}");
         }
     }
 
     private void SplitLeafById(string? nodeId, SplitDirection direction)
     {
+        if (!IsLayoutEditMode)
+        {
+            return;
+        }
+
         if (!_queryService.IsLeaf(CurrentDocument, nodeId))
         {
             return;
@@ -802,6 +899,11 @@ public sealed class MainViewModel : ObservableObject
 
     private void SplitLeafIntoThirds(string? nodeId, SplitDirection direction)
     {
+        if (!IsLayoutEditMode)
+        {
+            return;
+        }
+
         if (!_queryService.IsLeaf(CurrentDocument, nodeId))
         {
             return;
@@ -818,6 +920,11 @@ public sealed class MainViewModel : ObservableObject
 
     private void DeleteContainingSplit(string? nodeId)
     {
+        if (!IsLayoutEditMode)
+        {
+            return;
+        }
+
         if (nodeId is null)
         {
             return;
@@ -855,7 +962,7 @@ public sealed class MainViewModel : ObservableObject
 
         if (shouldOverwrite)
         {
-            var overwrite = ShowMessage($"已存在名为“{targetName}”的布局，是否覆盖？", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            var overwrite = ShowMessage($"已存在名为“{targetName}”的分区布局，是否覆盖？", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (overwrite != MessageBoxResult.Yes)
             {
                 return false;
@@ -884,7 +991,7 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             PaneWorksLog.Error($"Save layout sync failed: {targetId}", ex);
-            ShowErrorMessage($"保存布局失败：{ex.Message}");
+            ShowErrorMessage($"保存分区布局失败：{ex.Message}");
             return false;
         }
 
@@ -892,6 +999,10 @@ public sealed class MainViewModel : ObservableObject
         _currentLayoutId = targetId;
         _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
         IsDirty = false;
+        if (willRenameCurrentFile)
+        {
+            HandleLayoutIdRenamedForWorkspaceProfiles(previousId, targetId);
+        }
 
         if (tracksCurrentAsSnap)
         {
@@ -902,16 +1013,17 @@ public sealed class MainViewModel : ObservableObject
         SaveSessionState();
 
         RefreshLayouts();
+        RefreshWorkspaceProfiles();
         SelectedLayoutItem = Layouts.FirstOrDefault(item => item.Id == _currentLayoutId);
 
         if (notifyOnSuccess)
         {
-            ShowInfoMessage($"多屏布局“{targetName}”已保存。当前所有屏幕的编辑结果都会写进同一个文件。");
+            ShowInfoMessage($"分区布局“{targetName}”已保存。当前所有屏幕的编辑结果都会写进同一个文件。");
         }
 
         if (!notifyOnSuccess)
         {
-            SetStatusMessage($"多屏布局“{targetName}”已保存");
+            SetStatusMessage($"分区布局“{targetName}”已保存");
         }
 
         return true;
@@ -931,7 +1043,7 @@ public sealed class MainViewModel : ObservableObject
 
         if (shouldOverwrite)
         {
-            var overwrite = ShowMessage($"已存在名为“{targetName}”的布局，是否覆盖？", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            var overwrite = ShowMessage($"已存在名为“{targetName}”的分区布局，是否覆盖？", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (overwrite != MessageBoxResult.Yes)
             {
                 return false;
@@ -956,7 +1068,7 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             PaneWorksLog.Error($"Save layout async failed: {targetId}", ex);
-            ShowErrorMessage($"保存布局失败：{ex.Message}");
+            ShowErrorMessage($"保存分区布局失败：{ex.Message}");
             return false;
         }
 
@@ -964,6 +1076,10 @@ public sealed class MainViewModel : ObservableObject
         _currentLayoutId = targetId;
         _savedState = new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId);
         IsDirty = false;
+        if (willRenameCurrentFile)
+        {
+            HandleLayoutIdRenamedForWorkspaceProfiles(previousId, targetId);
+        }
 
         if (tracksCurrentAsSnap)
         {
@@ -974,16 +1090,17 @@ public sealed class MainViewModel : ObservableObject
         SaveSessionState();
 
         await RefreshLayoutsAsync();
+        await RefreshWorkspaceProfilesAsync();
         SelectedLayoutItem = Layouts.FirstOrDefault(item => item.Id == _currentLayoutId);
 
         if (notifyOnSuccess)
         {
-            ShowInfoMessage($"多屏布局“{targetName}”已保存。当前所有屏幕的编辑结果都会写进同一个文件。");
+            ShowInfoMessage($"分区布局“{targetName}”已保存。当前所有屏幕的编辑结果都会写进同一个文件。");
         }
 
         if (!notifyOnSuccess)
         {
-            SetStatusMessage($"多屏布局“{targetName}”已保存");
+            SetStatusMessage($"分区布局“{targetName}”已保存");
         }
 
         return true;
@@ -1063,7 +1180,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 Id = item.Id,
                 Name = item.Name,
-                Description = $"多屏布局文件：{item.Id}.json"
+                Description = $"分区布局文件：{item.Id}.json"
             });
         }
 
@@ -1113,6 +1230,7 @@ public sealed class MainViewModel : ObservableObject
 
         ActivateDisplay(SelectedDisplayItem?.Id ?? GetPrimaryDisplayId(), resetHistory: true);
         SelectedLayoutItem = Layouts.FirstOrDefault(item => item.Id == _currentLayoutId);
+        TryRestoreWorkspaceProfileSelectionOnStartup(sessionState.LastWorkspaceProfileId);
         SaveSessionState();
     }
 
@@ -1182,12 +1300,36 @@ public sealed class MainViewModel : ObservableObject
         _redoCommand.RaiseCanExecuteChanged();
     }
 
+    private void UpdateLayoutCommandStates()
+    {
+        _saveLayoutCommand.RaiseCanExecuteChanged();
+        _saveAsLayoutCommand.RaiseCanExecuteChanged();
+        _exitLayoutEditModeCommand.RaiseCanExecuteChanged();
+        if (SplitHorizontalCommand is RelayCommand splitHorizontalCommand)
+        {
+            splitHorizontalCommand.RaiseCanExecuteChanged();
+        }
+
+        if (SplitVerticalCommand is RelayCommand splitVerticalCommand)
+        {
+            splitVerticalCommand.RaiseCanExecuteChanged();
+        }
+
+        if (DeleteSelectedSplitCommand is RelayCommand deleteSplitCommand)
+        {
+            deleteSplitCommand.RaiseCanExecuteChanged();
+        }
+
+        UpdateHistoryCommandStates();
+    }
+
     private void SaveSessionState()
     {
         _sessionStateRepository.Save(new SessionState
         {
             LastLayoutId = _currentLayoutId,
             LastSnapLayoutId = _activeSnapLayoutId,
+            LastWorkspaceProfileId = _activeWorkspaceProfileId ?? SelectedWorkspaceProfileItem?.Id,
             SelectedDisplayId = SelectedDisplayItem?.Id
         });
     }
@@ -1196,6 +1338,11 @@ public sealed class MainViewModel : ObservableObject
     {
         _lastStatusMessage = message;
         RaisePropertyChanged(nameof(StatusLine));
+    }
+
+    public void SetUserStatusMessage(string message)
+    {
+        SetStatusMessage(message);
     }
 
     private AppSettings LoadAppSettings()
@@ -1222,7 +1369,7 @@ public sealed class MainViewModel : ObservableObject
 
         if (selectedItem is null)
         {
-            ShowErrorMessage("未找到要切换的吸附布局。");
+            ShowErrorMessage("未找到要切换的分区布局。");
             return false;
         }
 
@@ -1233,23 +1380,24 @@ public sealed class MainViewModel : ObservableObject
 
             SelectedLayoutItem = selectedItem;
             SetActiveSnapWorkspace(selectedItem.Id, workspace.Name, workspace);
+            ClearActiveWorkspaceProfileAfterPlainLayoutSwitch();
             SaveSessionState();
 
             if (notifyOnSuccess)
             {
-                ShowInfoMessage($"当前吸附布局已切换为“{workspace.Name}”。这套多屏布局会直接用于后续所有屏幕吸附。");
+                ShowInfoMessage($"当前分区布局已切换为“{workspace.Name}”。这套多屏布局会直接用于后续所有屏幕吸附。");
             }
 
             if (!notifyOnSuccess)
             {
-                SetStatusMessage($"当前吸附布局已切换为“{workspace.Name}”");
+                SetStatusMessage($"当前分区布局已切换为“{workspace.Name}”");
             }
 
             return true;
         }
         catch (Exception ex)
         {
-            ShowErrorMessage($"设置吸附布局失败：{ex.Message}");
+            ShowErrorMessage($"设置分区布局失败：{ex.Message}");
             return false;
         }
     }
@@ -1285,7 +1433,7 @@ public sealed class MainViewModel : ObservableObject
             layouts[display.Id] = _editorService.CreateBlank(normalizedName);
         }
 
-        return new WorkspaceLayoutDocument(1, normalizedName, layouts, new List<WorkspaceWindowBinding>());
+        return new WorkspaceLayoutDocument(1, normalizedName, layouts);
     }
 
     private WorkspaceLayoutDocument NormalizeWorkspaceForCurrentDisplays(WorkspaceLayoutDocument workspace)
@@ -1317,8 +1465,7 @@ public sealed class MainViewModel : ObservableObject
         return new WorkspaceLayoutDocument(
             workspace.Version,
             normalizedName,
-            layouts,
-            NormalizeWindowBindings(workspace.WindowBindings));
+            layouts);
     }
 
     private LayoutDocument GetDisplayLayout(WorkspaceLayoutDocument workspace, string? displayId)
@@ -1348,43 +1495,6 @@ public sealed class MainViewModel : ObservableObject
         return workspace with { DisplayLayouts = layouts };
     }
 
-    private static WorkspaceWindowBinding? GetWindowBinding(WorkspaceLayoutDocument workspace, string displayId, string nodeId)
-    {
-        return NormalizeWindowBindings(workspace.WindowBindings).FirstOrDefault(item =>
-            string.Equals(item.DisplayId, displayId, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(item.NodeId, nodeId, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static WorkspaceLayoutDocument UpsertWindowBinding(WorkspaceLayoutDocument workspace, WorkspaceWindowBinding binding)
-    {
-        var bindings = NormalizeWindowBindings(workspace.WindowBindings);
-        var index = bindings.FindIndex(item =>
-            string.Equals(item.DisplayId, binding.DisplayId, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(item.NodeId, binding.NodeId, StringComparison.OrdinalIgnoreCase));
-
-        if (index >= 0)
-        {
-            bindings[index] = binding;
-        }
-        else
-        {
-            bindings.Add(binding);
-        }
-
-        return workspace with { WindowBindings = bindings };
-    }
-
-    private static WorkspaceLayoutDocument RemoveWindowBinding(WorkspaceLayoutDocument workspace, string displayId, string nodeId)
-    {
-        var bindings = NormalizeWindowBindings(workspace.WindowBindings)
-            .Where(item =>
-                !string.Equals(item.DisplayId, displayId, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(item.NodeId, nodeId, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        return workspace with { WindowBindings = bindings };
-    }
-
     private WorkspaceLayoutDocument RenameWorkspace(WorkspaceLayoutDocument workspace, string newName)
     {
         var normalizedName = NormalizeLayoutName(newName);
@@ -1407,7 +1517,14 @@ public sealed class MainViewModel : ObservableObject
         _activeSnapWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(workspace);
         RaisePropertyChanged(nameof(ActiveSnapLayoutName));
         RaisePropertyChanged(nameof(ActiveSnapLayoutId));
+        RaisePropertyChanged(nameof(DisplayedLayoutName));
         RaisePropertyChanged(nameof(SnapLayoutLabel));
+        RaisePropertyChanged(nameof(WorkspaceProfileLabel));
+        if (CreateWorkspaceProfileFromCurrentLayoutCommand is RelayCommand createWorkspaceFromActiveCommand)
+        {
+            createWorkspaceFromActiveCommand.RaiseCanExecuteChanged();
+        }
+
         RaiseWindowBindingStatusChanged();
     }
 
@@ -1416,6 +1533,7 @@ public sealed class MainViewModel : ObservableObject
         RaisePropertyChanged(nameof(SelectedRegionBindingSummary));
         RaisePropertyChanged(nameof(SelectedRegionBindingDescription));
         RaisePropertyChanged(nameof(IsCurrentLayoutDrivingSnapLayout));
+        RaisePropertyChanged(nameof(ActiveWorkspaceWindowBindings));
     }
 
     private bool ShouldSyncActiveSnapWithCurrentWorkspace()
@@ -1469,6 +1587,9 @@ public sealed class MainViewModel : ObservableObject
         var snapModifier = ShortcutGestureHelper.NormalizeShortcut(
             settings.SnapModifierKey,
             ShortcutGestureHelper.NormalizeShortcut(AppSettings.Default.SnapModifierKey, "Shift"));
+        var runtimeSessionModifier = ShortcutGestureHelper.NormalizeShortcut(
+            settings.RuntimeSessionModifierKey,
+            ShortcutGestureHelper.NormalizeShortcut(AppSettings.Default.RuntimeSessionModifierKey, "Ctrl + Shift"));
         var minimizeShortcut = ShortcutGestureHelper.NormalizeShortcut(
             settings.MinimizeShortcut,
             ShortcutGestureHelper.NormalizeShortcut(AppSettings.Default.MinimizeShortcut, "Esc"));
@@ -1476,6 +1597,7 @@ public sealed class MainViewModel : ObservableObject
         return settings with
         {
             SnapModifierKey = snapModifier,
+            RuntimeSessionModifierKey = runtimeSessionModifier,
             MinimizeShortcut = minimizeShortcut
         };
     }
@@ -1574,12 +1696,23 @@ public sealed class MainViewModel : ObservableObject
                 DisplayId = item.DisplayId.Trim(),
                 NodeId = item.NodeId.Trim(),
                 ProcessName = item.ProcessName.Trim(),
-                WindowTitleSnapshot = item.WindowTitleSnapshot?.Trim() ?? string.Empty
+                WindowTitleSnapshot = item.WindowTitleSnapshot?.Trim() ?? string.Empty,
+                ExecutablePath = item.ExecutablePath?.Trim() ?? string.Empty,
+                LaunchArguments = item.LaunchArguments?.Trim() ?? string.Empty,
+                WorkingDirectory = item.WorkingDirectory?.Trim() ?? string.Empty,
+                MatchKind = NormalizeBindingToken(item.MatchKind, "Window"),
+                MatchMode = NormalizeBindingToken(item.MatchMode, "Auto"),
+                LaunchTarget = item.LaunchTarget?.Trim() ?? string.Empty,
+                StackOrder = Math.Max(0, item.StackOrder)
             })
-            .GroupBy(item => $"{item.DisplayId}::{item.NodeId}", StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.Last())
             .ToList()
             ?? new List<WorkspaceWindowBinding>();
+    }
+
+    private static string NormalizeBindingToken(string? value, string fallback)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
     }
 
     private sealed record EditorHistoryState(WorkspaceLayoutDocument WorkspaceDocument, string? SelectedNodeId);
