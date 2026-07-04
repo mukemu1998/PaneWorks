@@ -33,6 +33,12 @@ public partial class MainWindow : Window
     private const double ResizeGripThreshold = 16;
     private const double WindowBoundsTolerance = 3;
     private const double RuntimeLinkedResizeTolerance = 10;
+    private const double RuntimeEdgeMagnetTolerance = 12;
+    private const double RuntimeEdgeMagnetMinimumOverlap = 36;
+    private const double RuntimeEdgeAlignmentAdjacencyTolerance = 18;
+    private const double SnapAssistRegionProximityTolerance = 48;
+    private const double SnapAssistRegionSwitchDistanceMargin = 12;
+    private const double SnapAssistRegionSwitchOverlapMargin = 4096;
     private const double RuntimeLinkedResizeMinWidth = 120;
     private const double RuntimeLinkedResizeMinHeight = 80;
     private const double DragAnchorMinRatio = 0.08;
@@ -46,6 +52,7 @@ public partial class MainWindow : Window
     private static readonly bool EnableRuntimeLinkedResize = true;
     private static readonly TimeSpan DetachedRestoreApplyInterval = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan InternalLayoutMoveSuppressDuration = TimeSpan.FromMilliseconds(450);
+    private static readonly TimeSpan SnapAssistTargetMemoryDuration = TimeSpan.FromMilliseconds(350);
     private static readonly TimeSpan WorkspaceLaunchInitialRestoreDelay = TimeSpan.FromMilliseconds(700);
     private static readonly TimeSpan WorkspaceLaunchRestoreRetryInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan WorkspaceLaunchRestoreTimeout = TimeSpan.FromSeconds(30);
@@ -79,6 +86,10 @@ public partial class MainWindow : Window
     private IntPtr _movingWindowHandle;
     private ComputedRegion? _hoveredSnapRegion;
     private string? _hoveredSnapDisplayId;
+    private ComputedRegion? _lastSnapAssistRegion;
+    private string? _lastSnapAssistDisplayId;
+    private DateTimeOffset _lastSnapAssistTargetAt;
+    private IntPtr _lastSnapAssistWindowHandle;
     private PaneRect? _movingWindowInitialBounds;
     private PaneRect? _pendingDetachedRestoreBounds;
     private DateTimeOffset? _movingWindowStartedAt;
@@ -621,6 +632,7 @@ public partial class MainWindow : Window
         PaneWorksLog.Info($"{(startedByForegroundFallback ? "Foreground fallback move started" : "Move started")}: 0x{_movingWindowHandle.ToInt64():X}");
         _hoveredSnapRegion = null;
         _hoveredSnapDisplayId = null;
+        ClearSnapAssistTargetMemory();
         _movingWindowInitialBounds = _workspaceApplyService.TryGetVisibleWindowBounds(_movingWindowHandle, out var initialBounds)
             ? initialBounds
             : null;
@@ -630,7 +642,7 @@ public partial class MainWindow : Window
         _movingWindowSnapResizeGesture = _movingWindowWasSnapped && IsResizeGesture(_movingWindowInitialBounds);
         _movingWindowDetachCandidate = _movingWindowWasSnapped && !_movingWindowSnapResizeGesture;
 
-        if (_movingWindowDetachCandidate)
+        if (_movingWindowDetachCandidate && !startedByForegroundFallback)
         {
             DetachMovingWindowFromSnapGroup();
         }
@@ -705,14 +717,17 @@ public partial class MainWindow : Window
         {
             RestoreDetachedWindowAfterMove();
         }
-        else if (_hoveredSnapRegion is not null && !string.IsNullOrWhiteSpace(_hoveredSnapDisplayId))
+        else if (TryResolveSnapTargetForRelease(out var snapRegion, out var snapDisplayId))
         {
             var restoreBounds = ResolveRestoreBoundsForSnap(_movingWindowHandle);
             PaneWorksLog.Info($"Snap window ({reason}): 0x{_movingWindowHandle.ToInt64():X}, restore={restoreBounds.Width:0}x{restoreBounds.Height:0}");
-            _snapBindings[_movingWindowHandle] = new SnapBindingState(_hoveredSnapRegion.NodeId, _hoveredSnapDisplayId, restoreBounds);
-            _snapRuntimeBounds[_movingWindowHandle] = _hoveredSnapRegion.Bounds;
-            TrySnapWindowToBoundsWithStatus(_movingWindowHandle, _hoveredSnapRegion.Bounds, reason);
-            QueueSnappedWindowInfoCache(_movingWindowHandle);
+            _snapBindings[_movingWindowHandle] = new SnapBindingState(snapRegion.NodeId, snapDisplayId, restoreBounds);
+            _snapRuntimeBounds[_movingWindowHandle] = snapRegion.Bounds;
+            if (TrySnapWindowToBoundsWithStatus(_movingWindowHandle, snapRegion.Bounds, reason))
+            {
+                BringSnappedWindowToTopSoon(_movingWindowHandle);
+                QueueSnappedWindowInfoCache(_movingWindowHandle);
+            }
         }
         else if (_movingWindowSnapResizeGesture)
         {
@@ -740,6 +755,28 @@ public partial class MainWindow : Window
             ? "这个窗口权限高于 PaneWorks。请用管理员身份启动 PaneWorks 后再吸附任务管理器或管理员软件。"
             : $"窗口吸附被系统拒绝，错误码：{errorCode}");
         return false;
+    }
+
+    private void BringSnappedWindowToTopSoon(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _workspaceApplyService.BringWindowToTop(windowHandle);
+        _ = Task.Delay(120).ContinueWith(
+            _ =>
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    if (_snapBindings.ContainsKey(windowHandle))
+                    {
+                        _workspaceApplyService.BringWindowToTop(windowHandle);
+                    }
+                });
+            },
+            TaskScheduler.Default);
     }
 
     private void SnapAssistTimer_Tick(object? sender, EventArgs e)
@@ -788,15 +825,21 @@ public partial class MainWindow : Window
                 return;
             }
 
-                var snapAssistMode = GetActiveSnapAssistMode();
-                if (snapAssistMode == SnapAssistMode.None)
+            if (_movingWindowStartedByForegroundFallback && _movingWindowDetachCandidate)
+            {
+                DetachMovingWindowFromSnapGroup();
+                return;
+            }
+
+            var snapAssistMode = GetActiveSnapAssistMode();
+            if (snapAssistMode == SnapAssistMode.None)
+            {
+                if (!_movingWindowDetachedFromSnapGroup && _snapBindings.ContainsKey(_movingWindowHandle))
                 {
-                    if (!_movingWindowDetachedFromSnapGroup && _snapBindings.ContainsKey(_movingWindowHandle))
-                    {
-                        EnsureSnapOverlayHidden();
-                        _movingWindowDetachCandidate = false;
-                        return;
-                    }
+                    EnsureSnapOverlayHidden();
+                    _movingWindowDetachCandidate = false;
+                    return;
+                }
 
                 _hoveredSnapRegion = null;
                 _hoveredSnapDisplayId = null;
@@ -804,13 +847,13 @@ public partial class MainWindow : Window
                 return;
             }
         }
-            catch (Exception exception)
-            {
-                PaneWorksLog.Error("Snap assist timer failed", exception);
-                ResetMovingWindowState();
-                EnsureSnapOverlayHidden();
-                return;
-            }
+        catch (Exception exception)
+        {
+            PaneWorksLog.Error("Snap assist timer failed", exception);
+            ResetMovingWindowState();
+            EnsureSnapOverlayHidden();
+            return;
+        }
 
         try
         {
@@ -836,8 +879,9 @@ public partial class MainWindow : Window
                 targetStageBounds,
                 SnapTargetSplitterThickness);
 
-            _hoveredSnapRegion = targetGeometry.Regions.FirstOrDefault(region => Contains(region.Bounds, cursorInDevicePixels));
+            _hoveredSnapRegion = ResolveHoveredSnapRegion(targetGeometry, activeDisplay.Id, cursorInDevicePixels);
             _hoveredSnapDisplayId = activeDisplay.Id;
+            RememberSnapAssistTarget(_hoveredSnapRegion, _hoveredSnapDisplayId);
 
             EnsureSnapOverlaysVisible(activeDisplay.Id, _hoveredSnapRegion?.NodeId, snapAssistMode);
         }
@@ -1092,6 +1136,139 @@ public partial class MainWindow : Window
             && point.Y <= rect.Y + rect.Height;
     }
 
+    private ComputedRegion? ResolveHoveredSnapRegion(LayoutGeometryResult geometry, string displayId, WpfPoint cursorInDevicePixels)
+    {
+        if (geometry.Regions.Count == 0)
+        {
+            return null;
+        }
+
+        PaneRect movingBounds = default;
+        var hasMovingBounds = _movingWindowHandle != IntPtr.Zero
+            && _workspaceApplyService.TryGetVisibleWindowBounds(_movingWindowHandle, out movingBounds);
+        var candidates = geometry.Regions
+            .Select(region =>
+            {
+                var containsCursor = Contains(region.Bounds, cursorInDevicePixels);
+                var distance = GetDistanceToRect(region.Bounds, cursorInDevicePixels);
+                var overlapArea = hasMovingBounds ? GetOverlapArea(region.Bounds, movingBounds) : 0;
+                return new SnapRegionCandidate(region, containsCursor, distance, overlapArea);
+            })
+            .Where(candidate =>
+                candidate.ContainsCursor
+                || candidate.Distance <= SnapAssistRegionProximityTolerance
+                || candidate.OverlapArea > 0)
+            .ToList();
+
+        var bestCandidate = candidates
+            .OrderByDescending(candidate => candidate.ContainsCursor)
+            .ThenByDescending(candidate => candidate.OverlapArea)
+            .ThenBy(candidate => candidate.Distance)
+            .FirstOrDefault();
+
+        if (bestCandidate is null)
+        {
+            return null;
+        }
+
+        if (_hoveredSnapRegion is null
+            || !string.Equals(_hoveredSnapDisplayId, displayId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(_hoveredSnapRegion.NodeId, bestCandidate.Region.NodeId, StringComparison.Ordinal))
+        {
+            return bestCandidate.Region;
+        }
+
+        var currentCandidate = candidates.FirstOrDefault(candidate =>
+            string.Equals(candidate.Region.NodeId, _hoveredSnapRegion.NodeId, StringComparison.Ordinal));
+        if (currentCandidate is null)
+        {
+            return bestCandidate.Region;
+        }
+
+        if (currentCandidate.ContainsCursor && !bestCandidate.ContainsCursor)
+        {
+            return currentCandidate.Region;
+        }
+
+        if (bestCandidate.ContainsCursor && !currentCandidate.ContainsCursor)
+        {
+            return bestCandidate.Region;
+        }
+
+        var bestClearlyCloser = bestCandidate.Distance + SnapAssistRegionSwitchDistanceMargin < currentCandidate.Distance;
+        var bestClearlyLargerOverlap = bestCandidate.OverlapArea > currentCandidate.OverlapArea + SnapAssistRegionSwitchOverlapMargin;
+        return bestClearlyCloser || bestClearlyLargerOverlap
+            ? bestCandidate.Region
+            : currentCandidate.Region;
+    }
+
+    private void RememberSnapAssistTarget(ComputedRegion? region, string? displayId)
+    {
+        if (region is null || string.IsNullOrWhiteSpace(displayId) || _movingWindowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _lastSnapAssistRegion = region;
+        _lastSnapAssistDisplayId = displayId;
+        _lastSnapAssistTargetAt = DateTimeOffset.UtcNow;
+        _lastSnapAssistWindowHandle = _movingWindowHandle;
+    }
+
+    private bool TryResolveSnapTargetForRelease(out ComputedRegion region, out string displayId)
+    {
+        if (_hoveredSnapRegion is not null && !string.IsNullOrWhiteSpace(_hoveredSnapDisplayId))
+        {
+            region = _hoveredSnapRegion;
+            displayId = _hoveredSnapDisplayId;
+            return true;
+        }
+
+        if (_lastSnapAssistRegion is not null
+            && _lastSnapAssistWindowHandle == _movingWindowHandle
+            && !string.IsNullOrWhiteSpace(_lastSnapAssistDisplayId)
+            && DateTimeOffset.UtcNow - _lastSnapAssistTargetAt <= SnapAssistTargetMemoryDuration)
+        {
+            region = _lastSnapAssistRegion;
+            displayId = _lastSnapAssistDisplayId;
+            PaneWorksLog.Info($"Use remembered snap target: 0x{_movingWindowHandle.ToInt64():X}, node={region.NodeId}");
+            return true;
+        }
+
+        region = default!;
+        displayId = string.Empty;
+        return false;
+    }
+
+    private void ClearSnapAssistTargetMemory()
+    {
+        _lastSnapAssistRegion = null;
+        _lastSnapAssistDisplayId = null;
+        _lastSnapAssistTargetAt = DateTimeOffset.MinValue;
+        _lastSnapAssistWindowHandle = IntPtr.Zero;
+    }
+
+    private static double GetDistanceToRect(PaneRect rect, WpfPoint point)
+    {
+        var dx = point.X < rect.X
+            ? rect.X - point.X
+            : point.X > GetRight(rect)
+                ? point.X - GetRight(rect)
+                : 0;
+        var dy = point.Y < rect.Y
+            ? rect.Y - point.Y
+            : point.Y > GetBottom(rect)
+                ? point.Y - GetBottom(rect)
+                : 0;
+        return Math.Sqrt((dx * dx) + (dy * dy));
+    }
+
+    private static double GetOverlapArea(PaneRect first, PaneRect second)
+    {
+        return GetAxisOverlap(first.X, GetRight(first), second.X, GetRight(second))
+            * GetAxisOverlap(first.Y, GetBottom(first), second.Y, GetBottom(second));
+    }
+
     private SnapAssistMode GetActiveSnapAssistMode()
     {
         if (ShortcutGestureHelper.IsPressed(ViewModel.RuntimeSessionModifierKey))
@@ -1342,7 +1519,7 @@ public partial class MainWindow : Window
         _runtimeLinkedResizeSession = session;
         _movingWindowDetachCandidate = false;
 
-        PaneWorksLog.Info($"Runtime linked resize started: 0x{windowHandle.ToInt64():X}, edge={session.Edge}, neighbors={session.Neighbors.Count}");
+        PaneWorksLog.Info($"Runtime linked resize started: 0x{windowHandle.ToInt64():X}, edge={session.Edge}, neighbors={session.Neighbors.Count}, magnets={session.MagnetCandidates.Count}");
         _ = Task.Factory.StartNew(
             () => RunRuntimeLinkedResizeLoop(session, resizeGeneration, cancellationToken),
             cancellationToken,
@@ -1369,6 +1546,10 @@ public partial class MainWindow : Window
         CancellationToken cancellationToken)
     {
         var lastEdgePosition = double.NaN;
+        var activeNeighbors = session.Neighbors.ToList();
+        var magnetCandidates = session.MagnetCandidates.ToList();
+        var minEdgePosition = session.MinEdgePosition;
+        var maxEdgePosition = session.MaxEdgePosition;
 
         Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
         _ = timeBeginPeriod(1);
@@ -1380,15 +1561,41 @@ public partial class MainWindow : Window
                 if (_workspaceApplyService.TryGetVisibleWindowBounds(session.SourceWindowHandle, out var sourceBounds))
                 {
                     var rawEdgePosition = GetEdgePosition(sourceBounds, session.Edge);
-                    var edgePosition = ClampRuntimeLinkedEdgePosition(session, rawEdgePosition);
+                    var edgePosition = ClampRuntimeLinkedEdgePosition(rawEdgePosition, minEdgePosition, maxEdgePosition);
                     var isEdgeClamped = Math.Abs(edgePosition - rawEdgePosition) >= 0.5;
-
-                    if (double.IsNaN(lastEdgePosition) || Math.Abs(edgePosition - lastEdgePosition) >= 1 || isEdgeClamped)
+                    var sourceBoundsAtEdge = GetBoundsForRuntimeLinkedResizeEdge(
+                        session.SourceInitialBounds,
+                        session.SourceMinimumSize,
+                        session.Edge,
+                        edgePosition);
+                    var magnetAttached = TryAttachRuntimeEdgeMagnetCandidate(
+                        session,
+                        activeNeighbors,
+                        magnetCandidates,
+                        sourceBoundsAtEdge,
+                        edgePosition,
+                        ref minEdgePosition,
+                        ref maxEdgePosition,
+                        out var magnetEdgePosition,
+                        out var magnetLockedEdge);
+                    if (magnetAttached)
                     {
-                        var updates = BuildRuntimeLinkedResizeUpdates(session, edgePosition, includeSourceWindow: isEdgeClamped);
+                        edgePosition = ClampRuntimeLinkedEdgePosition(magnetEdgePosition, minEdgePosition, maxEdgePosition);
+                    }
+
+                    if (double.IsNaN(lastEdgePosition)
+                        || Math.Abs(edgePosition - lastEdgePosition) >= 1
+                        || isEdgeClamped
+                        || magnetAttached)
+                    {
+                        var updates = BuildRuntimeLinkedResizeUpdates(
+                            session,
+                            activeNeighbors,
+                            edgePosition,
+                            includeSourceWindow: isEdgeClamped || magnetAttached);
                         if (updates.Count > 0)
                         {
-                            var stopAtLockedEdge = isEdgeClamped;
+                            var stopAtLockedEdge = isEdgeClamped || magnetLockedEdge;
                             _suppressMoveEventsUntil = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(stopAtLockedEdge ? 350 : 120);
                             if (stopAtLockedEdge)
                             {
@@ -1481,7 +1688,55 @@ public partial class MainWindow : Window
             .Cast<RuntimeLinkedResizeNeighbor>()
             .ToList();
 
-        if (neighbors.Count == 0)
+        var neighborHandles = neighbors.Select(item => item.WindowHandle).ToHashSet();
+        var magnetCandidates = _snapBindings
+            .Where(item => item.Key != windowHandle
+                && !neighborHandles.Contains(item.Key)
+                && string.Equals(item.Value.DisplayId, binding.DisplayId, StringComparison.OrdinalIgnoreCase))
+            .Select(item =>
+            {
+                if (!_workspaceApplyService.TryGetVisibleWindowBounds(item.Key, out var bounds))
+                {
+                    return null;
+                }
+
+                return TryCreateRuntimeEdgeMagnetCandidate(sourceBounds, bounds, edge.Value, item.Key, out var candidate)
+                    ? candidate
+                    : null;
+            })
+            .Where(item => item is not null)
+            .Cast<RuntimeEdgeMagnetCandidate>()
+            .ToList();
+
+        if (ViewModel.TryGetDisplayById(binding.DisplayId, out var display)
+            && TryCreateRuntimeDisplayEdgeAlignmentCandidate(
+                sourceBounds,
+                GetSnapTargetStageBounds(display),
+                edge.Value,
+                out var displayAlignmentCandidate))
+        {
+            magnetCandidates.Add(displayAlignmentCandidate);
+        }
+
+        magnetCandidates.AddRange(_snapBindings
+            .Where(item => item.Key != windowHandle
+                && !neighborHandles.Contains(item.Key)
+                && string.Equals(item.Value.DisplayId, binding.DisplayId, StringComparison.OrdinalIgnoreCase))
+            .Select(item =>
+            {
+                if (!_workspaceApplyService.TryGetVisibleWindowBounds(item.Key, out var bounds))
+                {
+                    return null;
+                }
+
+                return TryCreateRuntimeEdgeAlignmentCandidate(sourceBounds, bounds, edge.Value, item.Key, out var candidate)
+                    ? candidate
+                    : null;
+            })
+            .Where(item => item is not null)
+            .Cast<RuntimeEdgeMagnetCandidate>());
+
+        if (neighbors.Count == 0 && magnetCandidates.Count == 0)
         {
             return false;
         }
@@ -1516,16 +1771,225 @@ public partial class MainWindow : Window
             edge.Value,
             minEdgePosition,
             maxEdgePosition,
-            neighbors);
+            neighbors,
+            magnetCandidates);
+        return true;
+    }
+
+    private bool TryCreateRuntimeEdgeMagnetCandidate(
+        PaneRect sourceBounds,
+        PaneRect candidateBounds,
+        ResizeEdge edge,
+        IntPtr windowHandle,
+        out RuntimeEdgeMagnetCandidate candidate)
+    {
+        candidate = default!;
+        if (!TryGetRuntimeEdgeMagnetTarget(sourceBounds, candidateBounds, edge, out var targetEdgePosition))
+        {
+            return false;
+        }
+
+        candidate = new RuntimeEdgeMagnetCandidate(
+            windowHandle,
+            candidateBounds,
+            RuntimeLinkedResizeSide.OppositeSide,
+            targetEdgePosition,
+            RuntimeEdgeMagnetAction.LinkOppositeEdge,
+            _workspaceApplyService.GetWindowMinimumVisibleSize(windowHandle),
+            _workspaceApplyService.GetWindowFrameAdjustment(windowHandle));
+        return true;
+    }
+
+    private static bool TryCreateRuntimeDisplayEdgeAlignmentCandidate(
+        PaneRect sourceBounds,
+        PaneRect displayBounds,
+        ResizeEdge edge,
+        out RuntimeEdgeMagnetCandidate candidate)
+    {
+        candidate = default!;
+        var sourceEdgePosition = GetEdgePosition(sourceBounds, edge);
+        var targetEdgePosition = edge switch
+        {
+            ResizeEdge.Left => displayBounds.X,
+            ResizeEdge.Right => GetRight(displayBounds),
+            ResizeEdge.Top => displayBounds.Y,
+            _ => GetBottom(displayBounds)
+        };
+
+        if (!IsRuntimeEdgeMagnetTargetInDragDirection(edge, sourceEdgePosition, targetEdgePosition))
+        {
+            return false;
+        }
+
+        candidate = new RuntimeEdgeMagnetCandidate(
+            IntPtr.Zero,
+            displayBounds,
+            RuntimeLinkedResizeSide.SameSide,
+            targetEdgePosition,
+            RuntimeEdgeMagnetAction.AlignSourceEdge,
+            default,
+            default);
+        return true;
+    }
+
+    private bool TryCreateRuntimeEdgeAlignmentCandidate(
+        PaneRect sourceBounds,
+        PaneRect candidateBounds,
+        ResizeEdge edge,
+        IntPtr windowHandle,
+        out RuntimeEdgeMagnetCandidate candidate)
+    {
+        candidate = default!;
+        var sourceEdgePosition = GetEdgePosition(sourceBounds, edge);
+        var targetEdgePosition = edge switch
+        {
+            ResizeEdge.Left => candidateBounds.X,
+            ResizeEdge.Right => GetRight(candidateBounds),
+            ResizeEdge.Top => candidateBounds.Y,
+            _ => GetBottom(candidateBounds)
+        };
+
+        if (!IsRuntimeEdgeMagnetTargetInDragDirection(edge, sourceEdgePosition, targetEdgePosition)
+            || !IsRuntimeEdgeAlignmentRelated(sourceBounds, candidateBounds, edge))
+        {
+            return false;
+        }
+
+        candidate = new RuntimeEdgeMagnetCandidate(
+            windowHandle,
+            candidateBounds,
+            RuntimeLinkedResizeSide.SameSide,
+            targetEdgePosition,
+            RuntimeEdgeMagnetAction.AlignSourceEdge,
+            _workspaceApplyService.GetWindowMinimumVisibleSize(windowHandle),
+            _workspaceApplyService.GetWindowFrameAdjustment(windowHandle));
+        return true;
+    }
+
+    private static bool TryGetRuntimeEdgeMagnetTarget(
+        PaneRect sourceBounds,
+        PaneRect candidateBounds,
+        ResizeEdge edge,
+        out double targetEdgePosition)
+    {
+        targetEdgePosition = default;
+        var sourceEdgePosition = GetEdgePosition(sourceBounds, edge);
+        targetEdgePosition = edge switch
+        {
+            ResizeEdge.Left => GetRight(candidateBounds),
+            ResizeEdge.Right => candidateBounds.X,
+            ResizeEdge.Top => GetBottom(candidateBounds),
+            _ => candidateBounds.Y
+        };
+
+        return IsRuntimeEdgeMagnetTargetInDragDirection(edge, sourceEdgePosition, targetEdgePosition);
+    }
+
+    private static bool IsRuntimeEdgeMagnetTargetInDragDirection(
+        ResizeEdge edge,
+        double sourceEdgePosition,
+        double targetEdgePosition)
+    {
+        return edge switch
+        {
+            ResizeEdge.Left or ResizeEdge.Top => targetEdgePosition < sourceEdgePosition,
+            _ => targetEdgePosition > sourceEdgePosition
+        };
+    }
+
+    private static double GetRuntimeEdgeMagnetOverlap(PaneRect sourceBounds, PaneRect candidateBounds, ResizeEdge edge)
+    {
+        return edge is ResizeEdge.Left or ResizeEdge.Right
+            ? GetAxisOverlap(sourceBounds.Y, GetBottom(sourceBounds), candidateBounds.Y, GetBottom(candidateBounds))
+            : GetAxisOverlap(sourceBounds.X, GetRight(sourceBounds), candidateBounds.X, GetRight(candidateBounds));
+    }
+
+    private static bool IsRuntimeEdgeAlignmentRelated(PaneRect sourceBounds, PaneRect candidateBounds, ResizeEdge edge)
+    {
+        if (GetRuntimeEdgeMagnetOverlap(sourceBounds, candidateBounds, edge) >= RuntimeEdgeMagnetMinimumOverlap)
+        {
+            return true;
+        }
+
+        return edge is ResizeEdge.Top or ResizeEdge.Bottom
+            ? AreEdgesCloseForAlignment(sourceBounds.X, GetRight(candidateBounds))
+                || AreEdgesCloseForAlignment(GetRight(sourceBounds), candidateBounds.X)
+            : AreEdgesCloseForAlignment(sourceBounds.Y, GetBottom(candidateBounds))
+                || AreEdgesCloseForAlignment(GetBottom(sourceBounds), candidateBounds.Y);
+    }
+
+    private static bool AreEdgesCloseForAlignment(double first, double second)
+    {
+        return Math.Abs(first - second) <= RuntimeEdgeAlignmentAdjacencyTolerance;
+    }
+
+    private static double GetAxisOverlap(double firstStart, double firstEnd, double secondStart, double secondEnd)
+    {
+        return Math.Max(0, Math.Min(firstEnd, secondEnd) - Math.Max(firstStart, secondStart));
+    }
+
+    private static bool TryAttachRuntimeEdgeMagnetCandidate(
+        RuntimeLinkedResizeSession session,
+        List<RuntimeLinkedResizeNeighbor> activeNeighbors,
+        List<RuntimeEdgeMagnetCandidate> magnetCandidates,
+        PaneRect sourceBoundsAtEdge,
+        double edgePosition,
+        ref double minEdgePosition,
+        ref double maxEdgePosition,
+        out double snappedEdgePosition,
+        out bool lockedEdge)
+    {
+        snappedEdgePosition = default;
+        lockedEdge = false;
+        var candidate = magnetCandidates
+            .Where(item =>
+                Math.Abs(item.TargetEdgePosition - edgePosition) <= RuntimeEdgeMagnetTolerance
+                && (item.Action == RuntimeEdgeMagnetAction.AlignSourceEdge
+                    || GetRuntimeEdgeMagnetOverlap(sourceBoundsAtEdge, item.InitialBounds, session.Edge) >= RuntimeEdgeMagnetMinimumOverlap))
+            .OrderBy(item => Math.Abs(item.TargetEdgePosition - edgePosition))
+            .FirstOrDefault();
+        if (candidate is null)
+        {
+            return false;
+        }
+
+        snappedEdgePosition = candidate.TargetEdgePosition;
+        magnetCandidates.Remove(candidate);
+        if (candidate.Action == RuntimeEdgeMagnetAction.LinkOppositeEdge)
+        {
+            activeNeighbors.Add(new RuntimeLinkedResizeNeighbor(
+                candidate.WindowHandle,
+                candidate.InitialBounds,
+                candidate.Side,
+                candidate.MinimumSize,
+                candidate.FrameAdjustment));
+            AddRuntimeLinkedEdgeConstraints(
+                candidate.InitialBounds,
+                candidate.MinimumSize,
+                GetRuntimeLinkedResizeEdge(session.Edge, candidate.Side),
+                ref minEdgePosition,
+                ref maxEdgePosition);
+        }
+        else
+        {
+            lockedEdge = true;
+            AddRuntimeEdgeAlignmentStopConstraint(session.Edge, snappedEdgePosition, ref minEdgePosition, ref maxEdgePosition);
+        }
+
+        var targetHandleText = candidate.WindowHandle == IntPtr.Zero
+            ? "display"
+            : $"0x{candidate.WindowHandle.ToInt64():X}";
+        PaneWorksLog.Info($"Runtime edge magnet attached: 0x{session.SourceWindowHandle.ToInt64():X} -> {targetHandleText}, action={candidate.Action}, edge={snappedEdgePosition:0}");
         return true;
     }
 
     private List<WindowBoundsUpdate> BuildRuntimeLinkedResizeUpdates(
         RuntimeLinkedResizeSession session,
+        IReadOnlyList<RuntimeLinkedResizeNeighbor> activeNeighbors,
         double edgePosition,
         bool includeSourceWindow)
     {
-        var updates = new List<WindowBoundsUpdate>(session.Neighbors.Count + (includeSourceWindow ? 1 : 0));
+        var updates = new List<WindowBoundsUpdate>(activeNeighbors.Count + (includeSourceWindow ? 1 : 0));
         if (includeSourceWindow)
         {
             updates.Add(new WindowBoundsUpdate(
@@ -1534,7 +1998,7 @@ public partial class MainWindow : Window
                 session.SourceFrameAdjustment));
         }
 
-        foreach (var neighbor in session.Neighbors)
+        foreach (var neighbor in activeNeighbors)
         {
             var bounds = GetRuntimeLinkedNeighborBounds(
                 neighbor.InitialBounds,
@@ -1745,18 +2209,38 @@ public partial class MainWindow : Window
         }
     }
 
-    private static double ClampRuntimeLinkedEdgePosition(
-        RuntimeLinkedResizeSession session,
-        double edgePosition)
+    private static void AddRuntimeEdgeAlignmentStopConstraint(
+        ResizeEdge edge,
+        double edgePosition,
+        ref double minEdgePosition,
+        ref double maxEdgePosition)
     {
-        if (session.MinEdgePosition > session.MaxEdgePosition)
+        switch (edge)
         {
-            return Math.Abs(edgePosition - session.MinEdgePosition) < Math.Abs(edgePosition - session.MaxEdgePosition)
-                ? session.MinEdgePosition
-                : session.MaxEdgePosition;
+            case ResizeEdge.Left:
+            case ResizeEdge.Top:
+                minEdgePosition = Math.Max(minEdgePosition, edgePosition);
+                break;
+            case ResizeEdge.Right:
+            case ResizeEdge.Bottom:
+                maxEdgePosition = Math.Min(maxEdgePosition, edgePosition);
+                break;
+        }
+    }
+
+    private static double ClampRuntimeLinkedEdgePosition(
+        double edgePosition,
+        double minEdgePosition,
+        double maxEdgePosition)
+    {
+        if (minEdgePosition > maxEdgePosition)
+        {
+            return Math.Abs(edgePosition - minEdgePosition) < Math.Abs(edgePosition - maxEdgePosition)
+                ? minEdgePosition
+                : maxEdgePosition;
         }
 
-        return Math.Clamp(edgePosition, session.MinEdgePosition, session.MaxEdgePosition);
+        return Math.Clamp(edgePosition, minEdgePosition, maxEdgePosition);
     }
 
     private static double GetRuntimeLinkedMinWidth(PaneRect bounds, WindowMinimumSize minimumSize)
@@ -2079,6 +2563,7 @@ public partial class MainWindow : Window
         _movingWindowHandle = IntPtr.Zero;
         _hoveredSnapRegion = null;
         _hoveredSnapDisplayId = null;
+        ClearSnapAssistTargetMemory();
         _movingWindowInitialBounds = null;
         _pendingDetachedRestoreBounds = null;
         _movingWindowStartedAt = null;
@@ -2421,7 +2906,8 @@ public partial class MainWindow : Window
         ResizeEdge Edge,
         double MinEdgePosition,
         double MaxEdgePosition,
-        IReadOnlyList<RuntimeLinkedResizeNeighbor> Neighbors);
+        IReadOnlyList<RuntimeLinkedResizeNeighbor> Neighbors,
+        IReadOnlyList<RuntimeEdgeMagnetCandidate> MagnetCandidates);
 
     private sealed record RuntimeLinkedResizeNeighbor(
         IntPtr WindowHandle,
@@ -2429,6 +2915,27 @@ public partial class MainWindow : Window
         RuntimeLinkedResizeSide Side,
         WindowMinimumSize MinimumSize,
         WindowFrameAdjustment FrameAdjustment);
+
+    private sealed record RuntimeEdgeMagnetCandidate(
+        IntPtr WindowHandle,
+        PaneRect InitialBounds,
+        RuntimeLinkedResizeSide Side,
+        double TargetEdgePosition,
+        RuntimeEdgeMagnetAction Action,
+        WindowMinimumSize MinimumSize,
+        WindowFrameAdjustment FrameAdjustment);
+
+    private enum RuntimeEdgeMagnetAction
+    {
+        LinkOppositeEdge,
+        AlignSourceEdge
+    }
+
+    private sealed record SnapRegionCandidate(
+        ComputedRegion Region,
+        bool ContainsCursor,
+        double Distance,
+        double OverlapArea);
 
     private enum RuntimeLinkedResizeSide
     {

@@ -23,6 +23,7 @@ public sealed class EditorCanvasControl : FrameworkElement
     private const double SplitterHitThickness = 10;
     private const double MinRegionSize = 120;
     private const double SplitterSnapThreshold = 12;
+    private const double SplitterDrawMergeTolerance = 6;
 
     public static readonly DependencyProperty DocumentProperty =
         DependencyProperty.Register(
@@ -250,32 +251,34 @@ public sealed class EditorCanvasControl : FrameworkElement
                 drawingContext.DrawRectangle(new SolidColorBrush(WpfColor.FromArgb(34, 84, 166, 255)), null, rect);
             }
 
-            drawingContext.DrawRectangle(
-                null,
-                new WpfPen(
-                    new SolidColorBrush(
-                        isPreview
-                            ? WpfColor.FromRgb(74, 222, 128)
-                            : isSelected
-                                ? WpfColor.FromRgb(84, 166, 255)
-                                : WpfColor.FromArgb(210, 255, 255, 255)),
-                    isPreview ? 3.2 : isSelected ? 3 : 1),
-                rect);
+            if (isPreview || isSelected)
+            {
+                drawingContext.DrawRectangle(
+                    null,
+                    new WpfPen(
+                        new SolidColorBrush(isPreview ? WpfColor.FromRgb(74, 222, 128) : WpfColor.FromRgb(84, 166, 255)),
+                        isPreview ? 3.2 : 3),
+                    rect);
+            }
         }
 
-        foreach (var splitter in _lastGeometry.Splitters)
+        drawingContext.DrawRectangle(
+            null,
+            new WpfPen(new SolidColorBrush(WpfColor.FromArgb(210, 255, 255, 255)), 1),
+            ToRect(stageBounds));
+
+        foreach (var splitter in MergeSplitterDrawSegments(_lastGeometry.Splitters, SelectedNodeId))
         {
-            var isSelected = splitter.SplitNodeId == SelectedNodeId;
             var basePen = new WpfPen(
-                new SolidColorBrush(isSelected ? WpfColor.FromRgb(84, 166, 255) : WpfColor.FromRgb(255, 214, 64)),
-                isSelected ? 3.2 : 2.2)
+                new SolidColorBrush(splitter.IsSelected ? WpfColor.FromRgb(84, 166, 255) : WpfColor.FromRgb(255, 214, 64)),
+                splitter.IsSelected ? 3.2 : 2.2)
             {
                 StartLineCap = PenLineCap.Round,
                 EndLineCap = PenLineCap.Round
             };
             var glowPen = new WpfPen(
-                new SolidColorBrush(isSelected ? WpfColor.FromArgb(92, 84, 166, 255) : WpfColor.FromArgb(48, 255, 214, 64)),
-                isSelected ? 7 : 4.5)
+                new SolidColorBrush(splitter.IsSelected ? WpfColor.FromArgb(92, 84, 166, 255) : WpfColor.FromArgb(48, 255, 214, 64)),
+                splitter.IsSelected ? 7 : 4.5)
             {
                 StartLineCap = PenLineCap.Round,
                 EndLineCap = PenLineCap.Round
@@ -283,27 +286,25 @@ public sealed class EditorCanvasControl : FrameworkElement
 
             if (splitter.Direction == SplitDirection.Vertical)
             {
-                var x = splitter.Bounds.X + (splitter.Bounds.Width / 2);
                 drawingContext.DrawLine(
                     glowPen,
-                    new WpfPoint(x, splitter.HostBounds.Y),
-                    new WpfPoint(x, splitter.HostBounds.Y + splitter.HostBounds.Height));
+                    new WpfPoint(splitter.AxisPosition, splitter.Start),
+                    new WpfPoint(splitter.AxisPosition, splitter.End));
                 drawingContext.DrawLine(
                     basePen,
-                    new WpfPoint(x, splitter.HostBounds.Y),
-                    new WpfPoint(x, splitter.HostBounds.Y + splitter.HostBounds.Height));
+                    new WpfPoint(splitter.AxisPosition, splitter.Start),
+                    new WpfPoint(splitter.AxisPosition, splitter.End));
                 continue;
             }
 
-            var y = splitter.Bounds.Y + (splitter.Bounds.Height / 2);
             drawingContext.DrawLine(
                 glowPen,
-                new WpfPoint(splitter.HostBounds.X, y),
-                new WpfPoint(splitter.HostBounds.X + splitter.HostBounds.Width, y));
+                new WpfPoint(splitter.Start, splitter.AxisPosition),
+                new WpfPoint(splitter.End, splitter.AxisPosition));
             drawingContext.DrawLine(
                 basePen,
-                new WpfPoint(splitter.HostBounds.X, y),
-                new WpfPoint(splitter.HostBounds.X + splitter.HostBounds.Width, y));
+                new WpfPoint(splitter.Start, splitter.AxisPosition),
+                new WpfPoint(splitter.End, splitter.AxisPosition));
         }
 
         DrawWorkspaceBindingMarkers(drawingContext);
@@ -376,21 +377,19 @@ public sealed class EditorCanvasControl : FrameworkElement
 
             drawingContext.DrawRectangle(null, borderPen, ToRect(reference.StageBounds));
 
-            foreach (var splitter in geometry.Splitters)
+            foreach (var splitter in MergeSplitterDrawSegments(geometry.Splitters, selectedNodeId: null))
             {
                 if (splitter.Direction == SplitDirection.Vertical)
                 {
-                    var x = splitter.Bounds.X + (splitter.Bounds.Width / 2);
-                    var start = new WpfPoint(x, splitter.HostBounds.Y);
-                    var end = new WpfPoint(x, splitter.HostBounds.Y + splitter.HostBounds.Height);
+                    var start = new WpfPoint(splitter.AxisPosition, splitter.Start);
+                    var end = new WpfPoint(splitter.AxisPosition, splitter.End);
                     drawingContext.DrawLine(splitterGlowPen, start, end);
                     drawingContext.DrawLine(splitterPen, start, end);
                     continue;
                 }
 
-                var y = splitter.Bounds.Y + (splitter.Bounds.Height / 2);
-                var horizontalStart = new WpfPoint(splitter.HostBounds.X, y);
-                var horizontalEnd = new WpfPoint(splitter.HostBounds.X + splitter.HostBounds.Width, y);
+                var horizontalStart = new WpfPoint(splitter.Start, splitter.AxisPosition);
+                var horizontalEnd = new WpfPoint(splitter.End, splitter.AxisPosition);
                 drawingContext.DrawLine(splitterGlowPen, horizontalStart, horizontalEnd);
                 drawingContext.DrawLine(splitterPen, horizontalStart, horizontalEnd);
             }
@@ -940,6 +939,60 @@ public sealed class EditorCanvasControl : FrameworkElement
                 });
     }
 
+    private static List<SplitterDrawSegment> MergeSplitterDrawSegments(
+        IEnumerable<ComputedSplitter> splitters,
+        string? selectedNodeId)
+    {
+        var rawSegments = splitters
+            .Select(splitter =>
+            {
+                var isSelected = selectedNodeId is not null
+                    && splitter.SplitNodeId == selectedNodeId;
+                return splitter.Direction == SplitDirection.Vertical
+                    ? new SplitterDrawSegment(
+                        splitter.Direction,
+                        splitter.Bounds.X + (splitter.Bounds.Width / 2),
+                        splitter.HostBounds.Y,
+                        splitter.HostBounds.Y + splitter.HostBounds.Height,
+                        isSelected)
+                    : new SplitterDrawSegment(
+                        splitter.Direction,
+                        splitter.Bounds.Y + (splitter.Bounds.Height / 2),
+                        splitter.HostBounds.X,
+                        splitter.HostBounds.X + splitter.HostBounds.Width,
+                        isSelected);
+            })
+            .OrderBy(segment => segment.Direction)
+            .ThenBy(segment => segment.AxisPosition)
+            .ThenBy(segment => segment.Start)
+            .ToList();
+
+        var mergedSegments = new List<SplitterDrawSegment>();
+        foreach (var segment in rawSegments)
+        {
+            var mergeIndex = mergedSegments.FindLastIndex(existing =>
+                existing.Direction == segment.Direction
+                && Math.Abs(existing.AxisPosition - segment.AxisPosition) <= SplitterDrawMergeTolerance
+                && segment.Start <= existing.End + SplitterDrawMergeTolerance
+                && existing.Start <= segment.End + SplitterDrawMergeTolerance);
+            if (mergeIndex < 0)
+            {
+                mergedSegments.Add(segment);
+                continue;
+            }
+
+            var existing = mergedSegments[mergeIndex];
+            mergedSegments[mergeIndex] = new SplitterDrawSegment(
+                existing.Direction,
+                (existing.AxisPosition + segment.AxisPosition) / 2,
+                Math.Min(existing.Start, segment.Start),
+                Math.Max(existing.End, segment.End),
+                existing.IsSelected || segment.IsSelected);
+        }
+
+        return mergedSegments;
+    }
+
     private void SetSnapGuide(SplitDirection direction, double axisPosition)
     {
         var changed = _snapGuideDirection != direction
@@ -966,4 +1019,11 @@ public sealed class EditorCanvasControl : FrameworkElement
         _snapGuideDirection = null;
         InvalidateVisual();
     }
+
+    private sealed record SplitterDrawSegment(
+        SplitDirection Direction,
+        double AxisPosition,
+        double Start,
+        double End,
+        bool IsSelected);
 }
