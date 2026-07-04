@@ -14,8 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/mukemu1998/PaneWorks/releases">下载发布版</a> ·
-  <a href="./CHANGELOG.md">更新记录</a> ·
-  <a href="./docs/github-release-guide.zh-CN.md">发布指南</a>
+  <a href="./CHANGELOG.md">更新记录</a> 
 </p>
 
 <p align="center">
