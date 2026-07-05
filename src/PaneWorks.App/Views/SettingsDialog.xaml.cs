@@ -1,4 +1,6 @@
+using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using PaneWorks.Infrastructure.Persistence;
 
 namespace PaneWorks.App.Views;
@@ -56,6 +58,27 @@ public partial class SettingsDialog : System.Windows.Window
         RuntimeSessionShortcutTextBox.Text = _runtimeSessionShortcut;
         MinimizeShortcutTextBox.Text = _minimizeShortcut;
         StopRecording("已恢复默认快捷键。");
+    }
+
+    private void CloseButton_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        Close();
+    }
+
+    private void HeaderDragArea_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 1 || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        if (IsButtonSource(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        DragMove();
+        e.Handled = true;
     }
 
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -149,6 +172,21 @@ public partial class SettingsDialog : System.Windows.Window
         RecordRuntimeSessionShortcutButton.Content = "开始录制";
         RecordMinimizeShortcutButton.Content = "开始录制";
         RecordingHintTextBlock.Text = hint;
+    }
+
+    private static bool IsButtonSource(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is System.Windows.Controls.Primitives.ButtonBase)
+            {
+                return true;
+            }
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return false;
     }
 
     private enum RecordingTarget

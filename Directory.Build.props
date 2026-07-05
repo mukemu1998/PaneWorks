@@ -1,14 +1,14 @@
 <Project>
   <PropertyGroup>
     <!-- Keep version metadata centralized for release updates. -->
-    <Authors>HKJ</Authors>
+    <Authors>HaG_Cat</Authors>
     <Company>PaneWorks</Company>
     <Product>PaneWorks</Product>
     <AssemblyName Condition="'$(AssemblyName)' == ''">$(MSBuildProjectName)</AssemblyName>
-    <VersionPrefix>0.2.2</VersionPrefix>
+    <VersionPrefix>0.2.3</VersionPrefix>
     <Version>$(VersionPrefix)</Version>
-    <AssemblyVersion>0.2.2.0</AssemblyVersion>
-    <FileVersion>0.2.2.0</FileVersion>
+    <AssemblyVersion>0.2.3.0</AssemblyVersion>
+    <FileVersion>0.2.3.0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <Deterministic>true</Deterministic>

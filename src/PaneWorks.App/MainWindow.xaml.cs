@@ -121,6 +121,11 @@ public partial class MainWindow : Window
     private WpfPoint _workbenchPanelDragStartPoint;
     private double _workbenchPanelDragStartOffsetX;
     private double _workbenchPanelDragStartOffsetY;
+    private bool _isWorkbenchMiniBarPointerDown;
+    private bool _isWorkbenchMiniBarDragging;
+    private WpfPoint _workbenchMiniBarDragStartPoint;
+    private double _workbenchMiniBarDragStartOffsetX;
+    private double _workbenchMiniBarDragStartOffsetY;
 
     private MainViewModel ViewModel => (MainViewModel)DataContext;
 
@@ -995,123 +1000,6 @@ public partial class MainWindow : Window
             .ToList();
         EditorCanvas.InvalidateVisual();
         UpdateWorkbenchPanelPosition();
-    }
-
-    private void UpdateWorkbenchPanelPosition()
-    {
-        if (!IsLoaded)
-        {
-            return;
-        }
-
-        var primaryDisplay = _displayDiscoveryService.GetPrimaryDisplay();
-        var primaryDisplayDipBounds = DeviceRectToDipRect(primaryDisplay.Bounds);
-        WorkbenchPanel.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
-
-        var panelWidth = WorkbenchPanel.Width > 0
-            ? WorkbenchPanel.Width
-            : WorkbenchPanel.DesiredSize.Width;
-        var panelHeight = WorkbenchPanel.ActualHeight > 0
-            ? WorkbenchPanel.ActualHeight
-            : WorkbenchPanel.DesiredSize.Height;
-
-        var preferredLeft = (primaryDisplayDipBounds.X - _virtualDesktopBounds.X)
-            + Math.Max(0, (primaryDisplayDipBounds.Width - panelWidth) / 2);
-        var leftMin = primaryDisplayDipBounds.X - _virtualDesktopBounds.X + 32;
-        var leftMax = primaryDisplayDipBounds.X - _virtualDesktopBounds.X + Math.Max(32, primaryDisplayDipBounds.Width - panelWidth - 32);
-        var left = Math.Clamp(preferredLeft, leftMin, leftMax);
-        var top = (primaryDisplayDipBounds.Y - _virtualDesktopBounds.Y)
-            + Math.Max(24, (primaryDisplayDipBounds.Height - panelHeight) / 2);
-
-        WorkbenchPanel.HorizontalAlignment = System.Windows.HorizontalAlignment.Left;
-        WorkbenchPanel.VerticalAlignment = System.Windows.VerticalAlignment.Top;
-        WorkbenchPanel.Margin = new Thickness(left, top, 0, 0);
-    }
-
-    private void WorkbenchDragHandle_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        _isWorkbenchPanelDragging = true;
-        _workbenchPanelDragStartPoint = e.GetPosition(this);
-        _workbenchPanelDragStartOffsetX = WorkbenchPanelTranslate.X;
-        _workbenchPanelDragStartOffsetY = WorkbenchPanelTranslate.Y;
-
-        if (sender is UIElement element)
-        {
-            element.CaptureMouse();
-        }
-
-        e.Handled = true;
-    }
-
-    private void WorkbenchDragHandle_MouseMove(object sender, WpfMouseEventArgs e)
-    {
-        if (!_isWorkbenchPanelDragging)
-        {
-            return;
-        }
-
-        if (e.LeftButton != MouseButtonState.Pressed)
-        {
-            EndWorkbenchPanelDrag(sender);
-            return;
-        }
-
-        var currentPoint = e.GetPosition(this);
-        SetWorkbenchPanelDragOffset(
-            _workbenchPanelDragStartOffsetX + currentPoint.X - _workbenchPanelDragStartPoint.X,
-            _workbenchPanelDragStartOffsetY + currentPoint.Y - _workbenchPanelDragStartPoint.Y);
-        e.Handled = true;
-    }
-
-    private void WorkbenchDragHandle_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        EndWorkbenchPanelDrag(sender);
-        e.Handled = true;
-    }
-
-    private void EndWorkbenchPanelDrag(object? sender)
-    {
-        if (!_isWorkbenchPanelDragging)
-        {
-            return;
-        }
-
-        _isWorkbenchPanelDragging = false;
-        if (sender is UIElement { IsMouseCaptured: true } element)
-        {
-            element.ReleaseMouseCapture();
-        }
-    }
-
-    private void SetWorkbenchPanelDragOffset(double offsetX, double offsetY)
-    {
-        var panelWidth = WorkbenchPanel.ActualWidth > 0
-            ? WorkbenchPanel.ActualWidth
-            : WorkbenchPanel.DesiredSize.Width;
-        var panelHeight = WorkbenchPanel.ActualHeight > 0
-            ? WorkbenchPanel.ActualHeight
-            : WorkbenchPanel.DesiredSize.Height;
-
-        if (ActualWidth > 0 && panelWidth > 0)
-        {
-            var minOffsetX = 12 - WorkbenchPanel.Margin.Left;
-            var maxOffsetX = Math.Max(
-                minOffsetX,
-                ActualWidth - WorkbenchPanel.Margin.Left - panelWidth - 12);
-            offsetX = Math.Clamp(offsetX, minOffsetX, maxOffsetX);
-        }
-
-        if (ActualHeight > 0 && panelHeight > 0)
-        {
-            var minOffsetY = 12 - WorkbenchPanel.Margin.Top;
-            var maxOffsetY = Math.Max(
-                minOffsetY,
-                ActualHeight - WorkbenchPanel.Margin.Top - panelHeight - 12);
-            offsetY = Math.Clamp(offsetY, minOffsetY, maxOffsetY);
-        }
-
-        WorkbenchPanelTranslate.X = offsetX;
-        WorkbenchPanelTranslate.Y = offsetY;
     }
 
     private static PaneRect GetSnapVisualStageBounds(PaneRect displayBounds)
@@ -3069,60 +2957,6 @@ public partial class MainWindow : Window
         return PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
     }
 
-    private void SettingsButton_Click(object sender, RoutedEventArgs e)
-    {
-        ViewModel.OpenSettings();
-    }
-
-    private void CloseWorkbenchButton_Click(object sender, RoutedEventArgs e)
-    {
-        MinimizeWorkbenchToTray();
-    }
-
-    private void MinimizeWorkbenchButton_Click(object sender, RoutedEventArgs e)
-    {
-        MinimizeWorkbenchToTaskbar();
-    }
-
-    private void SidebarWorkbenchButton_Click(object sender, RoutedEventArgs e)
-    {
-        MinimizeWorkbenchToSidebar();
-    }
-
-    private void RestoreWorkbenchButton_Click(object sender, RoutedEventArgs e)
-    {
-        RestoreWorkbenchFromSidebar();
-    }
-
-    private void MinimizeWorkbenchToSidebar()
-    {
-        EndWorkbenchPanelDrag(null);
-        WorkbenchPanel.Visibility = Visibility.Collapsed;
-        WorkbenchMiniBar.Visibility = Visibility.Visible;
-        PaneWorksLog.Info("Workbench minimized to sidebar");
-    }
-
-    private void MinimizeWorkbenchToTaskbar()
-    {
-        EndWorkbenchPanelDrag(null);
-        ShowInTaskbar = true;
-        WindowState = WindowState.Minimized;
-        PaneWorksLog.Info("Workbench minimized to taskbar");
-    }
-
-    private void MinimizeWorkbenchToTray()
-    {
-        EndWorkbenchPanelDrag(null);
-        ((App)WpfApplication.Current).MinimizeMainWindowToTray();
-    }
-
-    private void RestoreWorkbenchFromSidebar()
-    {
-        WorkbenchMiniBar.Visibility = Visibility.Collapsed;
-        WorkbenchPanel.Visibility = Visibility.Visible;
-        PaneWorksLog.Info("Workbench restored from sidebar");
-    }
-
     private void BindWindowButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.CanEditWorkspaceBindings)
@@ -3168,8 +3002,7 @@ public partial class MainWindow : Window
             windows,
             $"当前区域：{nodeId}  |  当前屏幕：{ViewModel.CurrentDisplayName}");
         dialog.PreferredWindowHandle = FindSnappedWindowHandleForRegion(displayId, nodeId);
-        dialog.Owner = this;
-        dialog.Topmost = Topmost;
+        PrepareSecondaryDialog(dialog);
 
         if (dialog.ShowDialog() != true || dialog.SelectedWindow is null)
         {

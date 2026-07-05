@@ -39,6 +39,7 @@
         <Grid x:Name="WorkbenchPanel"
               Width="820"
               MaxHeight="680"
+              Background="Transparent"
               HorizontalAlignment="Center"
               VerticalAlignment="Center"
               TextElement.Foreground="{StaticResource PaneTextBrush}">
@@ -46,11 +47,18 @@
                 <TranslateTransform x:Name="WorkbenchPanelTranslate" />
             </Grid.RenderTransform>
 
-            <Border Background="#D2141A29"
-                    BorderBrush="#42FFFFFF"
+            <Border Background="#EE101219"
+                    BorderBrush="#28FFFFFF"
                     BorderThickness="1"
                     CornerRadius="30"
                     IsHitTestVisible="False" />
+
+            <Border Height="92"
+                    VerticalAlignment="Top"
+                    Background="Transparent"
+                    MouseLeftButtonDown="WorkbenchDragHandle_MouseLeftButtonDown"
+                    MouseLeftButtonUp="WorkbenchDragHandle_MouseLeftButtonUp"
+                    MouseMove="WorkbenchDragHandle_MouseMove" />
 
             <Grid Margin="22">
                 <Grid.RowDefinitions>
@@ -59,7 +67,10 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                    <Grid>
+                    <Grid Background="Transparent"
+                          MouseLeftButtonDown="WorkbenchDragHandle_MouseLeftButtonDown"
+                          MouseLeftButtonUp="WorkbenchDragHandle_MouseLeftButtonUp"
+                          MouseMove="WorkbenchDragHandle_MouseMove">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -69,11 +80,7 @@
 
                         <Grid Grid.Column="0"
                               Grid.ColumnSpan="2"
-                              Background="Transparent"
-                              Cursor="SizeAll"
-                              MouseLeftButtonDown="WorkbenchDragHandle_MouseLeftButtonDown"
-                              MouseLeftButtonUp="WorkbenchDragHandle_MouseLeftButtonUp"
-                              MouseMove="WorkbenchDragHandle_MouseMove">
+                              Background="Transparent">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -89,13 +96,37 @@
 
                             <StackPanel Grid.Column="1"
                                         VerticalAlignment="Center">
-                                <TextBlock FontSize="25"
-                                           FontWeight="Bold"
-                                           IsHitTestVisible="False"
-                                           Text="PaneWorks 布局工作台" />
+                                <StackPanel Orientation="Horizontal"
+                                            IsHitTestVisible="False">
+                                    <TextBlock FontSize="25"
+                                               FontWeight="Bold"
+                                               Foreground="#29D8F2"
+                                               Text="Pane" />
+                                    <TextBlock FontSize="25"
+                                               FontWeight="Bold"
+                                               Foreground="#FF63F5"
+                                               Text="Works" />
+                                    <TextBlock Margin="8,0,0,0"
+                                               FontSize="25"
+                                               FontWeight="Bold"
+                                               Foreground="#F7F8FF"
+                                               Text="布局工作台" />
+                                    <Border Margin="10,4,0,0"
+                                            Padding="8,3"
+                                            VerticalAlignment="Center"
+                                            Background="#1C2F80ED"
+                                            BorderBrush="#4D58AFFF"
+                                            BorderThickness="1"
+                                            CornerRadius="10">
+                                        <TextBlock FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#58AFFF"
+                                                   Text="{Binding AppVersionLabel}" />
+                                    </Border>
+                                </StackPanel>
                                 <TextBlock Margin="0,6,0,0"
                                            FontSize="13"
-                                           Foreground="#CFE7FF"
+                                           Foreground="#9EA6B8"
                                            IsHitTestVisible="False"
                                            Text="透明桌面分割层，管理吸附布局；需要窗口绑定时再展开高级工作区。"
                                            TextWrapping="Wrap" />
@@ -106,25 +137,109 @@
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Top"
                                     Orientation="Horizontal">
-                            <Button MinWidth="78"
-                                    Margin="0,0,8,8"
-                                    Click="SettingsButton_Click"
-                                    Content="设置" />
                             <Button Style="{StaticResource CircleIconButtonStyle}"
+                                    Width="42"
+                                    Height="42"
+                                    MinWidth="42"
+                                    MinHeight="42"
+                                    Margin="0,0,8,8"
+                                    Background="#18FFFFFF"
+                                    BorderBrush="#30FFFFFF"
+                                    FontSize="18"
+                                    Click="AboutButton_Click"
+                                    ToolTip="关于 PaneWorks">
+                                <TextBlock Width="20"
+                                           Height="20"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           FontSize="18"
+                                           LineHeight="20"
+                                           LineStackingStrategy="BlockLineHeight"
+                                           Text="i"
+                                           TextAlignment="Center" />
+                            </Button>
+                            <Button Style="{StaticResource CircleIconButtonStyle}"
+                                    Width="42"
+                                    Height="42"
+                                    MinWidth="42"
+                                    MinHeight="42"
+                                    Margin="0,0,8,8"
+                                    Background="#18FFFFFF"
+                                    BorderBrush="#30FFFFFF"
+                                    Click="SettingsButton_Click"
+                                    ToolTip="设置">
+                                <Grid Width="42"
+                                      Height="42"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      IsHitTestVisible="False"
+                                      SnapsToDevicePixels="True">
+                                    <Viewbox Width="21"
+                                             Height="21"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center">
+                                        <Canvas Width="24"
+                                                Height="24">
+                                            <Path Fill="{StaticResource PaneTextBrush}"
+                                                  Data="M19.43,12.98C19.47,12.66 19.5,12.34 19.5,12C19.5,11.66 19.47,11.33 19.42,11L21.54,9.35C21.73,9.2 21.78,8.93 21.66,8.71L19.66,5.25C19.54,5.03 19.29,4.94 19.06,5.03L16.56,6.04C16.04,5.64 15.5,5.31 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.31 7.96,5.65 7.44,6.04L4.94,5.03C4.71,4.95 4.46,5.03 4.34,5.25L2.34,8.71C2.21,8.93 2.27,9.2 2.46,9.35L4.58,11C4.53,11.33 4.5,11.66 4.5,12C4.5,12.34 4.53,12.66 4.58,12.98L2.46,14.65C2.27,14.8 2.22,15.07 2.34,15.29L4.34,18.75C4.46,18.97 4.71,19.06 4.94,18.97L7.44,17.96C7.96,18.36 8.5,18.69 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.69 16.04,18.35 16.56,17.96L19.06,18.97C19.29,19.05 19.54,18.97 19.66,18.75L21.66,15.29C21.78,15.07 21.73,14.8 21.54,14.65L19.43,12.98ZM12,15.5A3.5,3.5 0 1,1 12,8A3.5,3.5 0 0,1 12,15.5Z" />
+                                        </Canvas>
+                                    </Viewbox>
+                                </Grid>
+                            </Button>
+                            <Button Style="{StaticResource CircleIconButtonStyle}"
+                                    Width="42"
+                                    Height="42"
+                                    MinWidth="42"
+                                    MinHeight="42"
                                     Margin="0,0,8,8"
                                     Click="SidebarWorkbenchButton_Click"
-                                    Content="⇥"
-                                    ToolTip="收起为侧边悬浮条" />
+                                    ToolTip="收起为侧边悬浮条">
+                                <TextBlock Width="22"
+                                           Height="22"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           FontSize="19"
+                                           LineHeight="22"
+                                           LineStackingStrategy="BlockLineHeight"
+                                           Text="⇥"
+                                           TextAlignment="Center" />
+                            </Button>
                             <Button Style="{StaticResource CircleIconButtonStyle}"
+                                    Width="42"
+                                    Height="42"
+                                    MinWidth="42"
+                                    MinHeight="42"
                                     Margin="0,0,8,8"
                                     Click="MinimizeWorkbenchButton_Click"
-                                    Content="－"
-                                    ToolTip="最小化到任务栏" />
+                                    ToolTip="最小化到任务栏">
+                                <TextBlock Width="22"
+                                           Height="22"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           FontSize="18"
+                                           LineHeight="20"
+                                           LineStackingStrategy="BlockLineHeight"
+                                           Text="－"
+                                           TextAlignment="Center" />
+                            </Button>
                             <Button Style="{StaticResource CircleIconButtonStyle}"
+                                    Width="42"
+                                    Height="42"
+                                    MinWidth="42"
+                                    MinHeight="42"
                                     Margin="0,0,0,8"
                                     Click="CloseWorkbenchButton_Click"
-                                    Content="×"
-                                    ToolTip="退出到托盘" />
+                                    ToolTip="退出到托盘">
+                                <TextBlock Width="22"
+                                           Height="22"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           FontSize="20"
+                                           LineHeight="22"
+                                           LineStackingStrategy="BlockLineHeight"
+                                           Text="×"
+                                           TextAlignment="Center" />
+                            </Button>
                         </StackPanel>
                     </Grid>
 
@@ -143,8 +258,8 @@
 
                     <Border Grid.Row="0"
                             Padding="18"
-                            Background="#90101625"
-                            BorderBrush="#26FFFFFF"
+                            Background="#A0101219"
+                            BorderBrush="#22FFFFFF"
                             BorderThickness="1"
                             CornerRadius="22">
                         <Grid>
@@ -166,15 +281,15 @@
                                                FontWeight="SemiBold"
                                                Text="吸附布局设置" />
                                     <TextBlock Margin="0,6,0,0"
-                                               Foreground="#CFE7FF"
+                                               Foreground="#CDD3DF"
                                                Text="{Binding StatusLine}"
                                                TextWrapping="Wrap" />
                                     <UniformGrid Margin="0,12,0,0"
                                                  Columns="3">
                                         <Border Margin="0,0,8,0"
                                                 Padding="12"
-                                                Background="#242F80ED"
-                                                BorderBrush="#3D9FC7FF"
+                                                Background="#1C2F80ED"
+                                                BorderBrush="#4D58AFFF"
                                                 BorderThickness="1"
                                                 CornerRadius="14">
                                             <StackPanel>
@@ -191,8 +306,8 @@
                                         </Border>
                                         <Border Margin="4,0,4,0"
                                                 Padding="12"
-                                                Background="#242FA36B"
-                                                BorderBrush="#4DBFF7C7"
+                                                 Background="#1A29D8F2"
+                                                 BorderBrush="#4D29D8F2"
                                                 BorderThickness="1"
                                                 CornerRadius="14">
                                             <StackPanel>
@@ -209,8 +324,8 @@
                                         </Border>
                                         <Border Margin="8,0,0,0"
                                                 Padding="12"
-                                                Background="#24E35C61"
-                                                BorderBrush="#55E35C61"
+                                                 Background="#1458AFFF"
+                                                 BorderBrush="#3D58AFFF"
                                                 BorderThickness="1"
                                                 CornerRadius="14">
                                             <StackPanel>
@@ -229,7 +344,7 @@
                                 </StackPanel>
                                 <TextBlock Grid.Column="1"
                                            Margin="16,2,0,0"
-                                           Foreground="#BFF7C7"
+                                           Foreground="#8FF0B8"
                                            Text="{Binding DirtyLabel}" />
                             </Grid>
 
@@ -242,7 +357,7 @@
 
                                 <StackPanel Grid.Column="0">
                                     <TextBlock FontSize="13"
-                                               Foreground="#9FC7FF"
+                                               Foreground="#58AFFF"
                                                Text="编辑屏幕" />
                                     <ComboBox Margin="0,8,0,0"
                                               ItemsSource="{Binding Displays}"
@@ -271,7 +386,7 @@
 
                                 <StackPanel Grid.Column="2">
                                     <TextBlock FontSize="13"
-                                               Foreground="#9FC7FF"
+                                               Foreground="#58AFFF"
                                                Text="当前吸附选择的分区布局" />
                                     <TextBox Margin="0,8,0,0"
                                              FontSize="20"
@@ -280,11 +395,11 @@
                                              Text="{Binding DisplayedLayoutName, UpdateSourceTrigger=PropertyChanged}" />
                                     <TextBlock Margin="0,8,0,0"
                                                FontWeight="SemiBold"
-                                               Foreground="#BFF7C7"
+                                               Foreground="#8FF0B8"
                                                Text="{Binding LayoutEditModeLabel}" />
                                     <TextBlock Margin="0,5,0,0"
                                                FontSize="12"
-                                               Foreground="#CFE7FF"
+                                               Foreground="#CDD3DF"
                                                Text="{Binding LayoutEditModeHint}"
                                                TextWrapping="Wrap" />
                                     <WrapPanel Margin="0,12,0,0">
@@ -322,7 +437,7 @@
 
                                 <Border Grid.Column="0"
                                         Padding="14"
-                                        Background="#66131A28"
+                                        Background="#66101219"
                                         BorderBrush="#20FFFFFF"
                                         BorderThickness="1"
                                         CornerRadius="18">
@@ -378,7 +493,7 @@
 
                                 <Border Grid.Column="2"
                                         Padding="14"
-                                        Background="#66131A28"
+                                        Background="#66101219"
                                         BorderBrush="#20FFFFFF"
                                         BorderThickness="1"
                                         CornerRadius="18">
@@ -387,7 +502,7 @@
                                                    FontWeight="SemiBold"
                                                    Text="当前吸附状态" />
                                         <TextBlock Margin="0,12,0,0"
-                                                   Foreground="#BFF7C7"
+                                                   Foreground="#8FF0B8"
                                                    Text="{Binding SnapLayoutLabel}"
                                                    TextWrapping="Wrap" />
                                         <TextBlock Margin="0,9,0,0"
@@ -395,7 +510,7 @@
                                                    Text="{Binding SelectionLabel}"
                                                    TextWrapping="Wrap" />
                                         <TextBlock Margin="0,9,0,0"
-                                                   Foreground="#A9C8FF"
+                                                   Foreground="#58AFFF"
                                                    Text="{Binding ShortcutSummary}"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
@@ -405,8 +520,8 @@
                     </Border>
 
                     <Border Grid.Row="2"
-                            Background="#70101625"
-                            BorderBrush="#28FFFFFF"
+                            Background="#88101219"
+                            BorderBrush="#22FFFFFF"
                             BorderThickness="1"
                             CornerRadius="22">
                         <Grid>
@@ -442,7 +557,7 @@
                                                                Text="工作区方案设置（高级编辑）" />
                                                     <TextBlock Margin="0,4,0,0"
                                                                FontSize="12"
-                                                               Foreground="#CFE7FF"
+                                                Foreground="#9EA6B8"
                                                                Text="用于绑定窗口、启动软件并恢复到指定区域。" />
                                                 </StackPanel>
 
@@ -450,8 +565,8 @@
                                                         Width="34"
                                                         Height="34"
                                                         VerticalAlignment="Center"
-                                                        Background="#24FFFFFF"
-                                                        BorderBrush="#38FFFFFF"
+                                                        Background="#18FFFFFF"
+                                                        BorderBrush="#30FFFFFF"
                                                         BorderThickness="1"
                                                         CornerRadius="12">
                                                     <Grid HorizontalAlignment="Center"
@@ -473,7 +588,7 @@
                                         </Border>
                                         <ControlTemplate.Triggers>
                                             <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="HeaderBorder" Property="Background" Value="#18FFFFFF" />
+                                                <Setter TargetName="HeaderBorder" Property="Background" Value="#122F80ED" />
                                             </Trigger>
                                             <Trigger Property="IsChecked" Value="True">
                                                 <Setter TargetName="ArrowCollapsed" Property="Visibility" Value="Collapsed" />
@@ -504,7 +619,7 @@
 
                             <Border Grid.Column="0"
                                     Padding="14"
-                                    Background="#66131A28"
+                                    Background="#66101219"
                                     BorderBrush="#20FFFFFF"
                                     BorderThickness="1"
                                     CornerRadius="18">
@@ -521,7 +636,7 @@
                                                Text="工作区方案" />
                                     <TextBlock Grid.Row="1"
                                                Margin="0,10,0,0"
-                                               Foreground="#D8B4FF"
+                                               Foreground="#58AFFF"
                                                Text="{Binding WorkspaceProfileLabel}"
                                                TextWrapping="Wrap" />
 
@@ -605,7 +720,7 @@
                                                Text="区域窗口绑定" />
                                     <TextBlock Margin="0,12,0,0"
                                                FontWeight="SemiBold"
-                                               Foreground="#BFF7C7"
+                                               Foreground="#8FF0B8"
                                                Text="{Binding SelectedRegionBindingSummary}"
                                                TextWrapping="Wrap" />
                                     <TextBlock Margin="0,9,0,0"
@@ -614,7 +729,7 @@
                                                TextWrapping="Wrap" />
                                     <TextBlock Margin="0,9,0,0"
                                                FontWeight="SemiBold"
-                                               Foreground="#D8B4FF"
+                                               Foreground="#58AFFF"
                                                Text="{Binding WorkspaceBindingModeLabel}"
                                                TextWrapping="Wrap" />
                                     <WrapPanel Margin="0,12,0,0">
@@ -652,7 +767,7 @@
                             BorderThickness="1"
                             CornerRadius="18"
                             IsHitTestVisible="False">
-                        <TextBlock Foreground="#A9C8FF"
+                        <TextBlock Foreground="#58AFFF"
                                    Text="提示：右键区域继续切分，右键分割线删除分割；“切换吸附布局”只影响后续用户分区吸附，“工作区方案”用于窗口绑定和自动恢复。"
                                    TextWrapping="Wrap" />
                     </Border>
@@ -667,13 +782,18 @@
                 Margin="0,0,14,0"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
-                Background="#D2141A29"
+                Background="#EE101219"
                 BorderBrush="#42FFFFFF"
                 BorderThickness="1"
                 Cursor="Hand"
-                Click="RestoreWorkbenchButton_Click"
+                PreviewMouseLeftButtonDown="WorkbenchMiniBar_PreviewMouseLeftButtonDown"
+                PreviewMouseMove="WorkbenchMiniBar_PreviewMouseMove"
+                PreviewMouseLeftButtonUp="WorkbenchMiniBar_PreviewMouseLeftButtonUp"
                 ToolTip="展开 PaneWorks 主菜单"
                 Visibility="Collapsed">
+            <Button.RenderTransform>
+                <TranslateTransform x:Name="WorkbenchMiniBarTranslate" />
+            </Button.RenderTransform>
             <Button.Template>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="MiniBarBorder"

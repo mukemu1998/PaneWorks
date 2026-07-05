@@ -333,6 +333,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     public string MinimizeShortcut => _appSettings.MinimizeShortcut;
 
+    public string AppVersionLabel => $"v{GetApplicationVersion()}";
+
     public string CurrentDisplayName => SelectedDisplayItem?.Name ?? "主屏幕";
 
     public string CurrentDisplaySummary => SelectedDisplayItem?.Description ?? string.Empty;
@@ -570,12 +572,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var dialog = new SettingsDialog(_appSettings);
         var owner = GetOwnerWindow();
-        if (owner is not null)
-        {
-            PrepareOwnerWindow(owner);
-            dialog.Owner = owner;
-            dialog.Topmost = owner.Topmost;
-        }
+        PrepareSecondaryDialog(dialog, owner);
 
         if (dialog.ShowDialog() != true || dialog.Result is null)
         {
@@ -607,6 +604,15 @@ public sealed partial class MainViewModel : ObservableObject
         {
             ShowErrorMessage($"保存设置失败：{ex.Message}");
         }
+    }
+
+    public void OpenAbout()
+    {
+        var dialog = new AboutDialog(AppVersionLabel);
+        var owner = GetOwnerWindow();
+        PrepareSecondaryDialog(dialog, owner);
+
+        _ = dialog.ShowDialog();
     }
 
     public void SwitchSnapLayout(string layoutId, bool notifyOnSuccess)
@@ -654,9 +660,9 @@ public sealed partial class MainViewModel : ObservableObject
         return ResolvePendingChanges("关闭 PaneWorks");
     }
 
-    private void CreateNewLayout()
+    private async void CreateNewLayout()
     {
-        if (!ResolvePendingChanges("新建分区布局"))
+        if (!await ResolvePendingChangesAsync("新建分区布局"))
         {
             return;
         }
@@ -731,14 +737,14 @@ public sealed partial class MainViewModel : ObservableObject
         TrySetSnapLayout(SelectedLayoutItem.Id, notifyOnSuccess: true);
     }
 
-    private void LoadSelectedLayout()
+    private async void LoadSelectedLayout()
     {
         if (SelectedLayoutItem is null)
         {
             return;
         }
 
-        if (!ResolvePendingChanges("打开选中的分区布局"))
+        if (!await ResolvePendingChangesAsync("打开选中的分区布局"))
         {
             return;
         }
@@ -746,10 +752,7 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             var workspace = NormalizeWorkspaceForCurrentDisplays(
-                _layoutRepository
-                    .LoadAsync(SelectedLayoutItem.Id, CancellationToken.None)
-                    .GetAwaiter()
-                    .GetResult());
+                await _layoutRepository.LoadAsync(SelectedLayoutItem.Id, CancellationToken.None));
 
             _currentWorkspaceDocument = workspace;
             _currentLayoutId = SelectedLayoutItem.Id;
@@ -767,9 +770,9 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    private void EditActiveSnapLayout()
+    private async void EditActiveSnapLayout()
     {
-        if (!ResolvePendingChanges("编辑当前吸附选择"))
+        if (!await ResolvePendingChangesAsync("编辑当前吸附选择"))
         {
             return;
         }
@@ -779,10 +782,7 @@ public sealed partial class MainViewModel : ObservableObject
             try
             {
                 _currentWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(
-                    _layoutRepository
-                        .LoadAsync(_activeSnapLayoutId, CancellationToken.None)
-                        .GetAwaiter()
-                        .GetResult());
+                    await _layoutRepository.LoadAsync(_activeSnapLayoutId, CancellationToken.None));
                 _currentLayoutId = _activeSnapLayoutId;
             }
             catch (Exception ex)
@@ -805,9 +805,9 @@ public sealed partial class MainViewModel : ObservableObject
         SaveSessionState();
     }
 
-    private void ExitLayoutEditMode()
+    private async void ExitLayoutEditMode()
     {
-        if (!ResolvePendingChanges("退出分区编辑"))
+        if (!await ResolvePendingChangesAsync("退出分区编辑", discardChangesOnNo: true))
         {
             return;
         }
@@ -1255,6 +1255,46 @@ public sealed partial class MainViewModel : ObservableObject
         return SaveToTarget(Slugify(CurrentLayoutName), CurrentLayoutName, treatAsSaveAs: false, notifyOnSuccess: false);
     }
 
+    private async Task<bool> ResolvePendingChangesAsync(string actionLabel, bool discardChangesOnNo = false)
+    {
+        if (!IsDirty)
+        {
+            return true;
+        }
+
+        var result = ShowMessage($"当前有未保存修改，是否先保存再{actionLabel}？", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (result == MessageBoxResult.Cancel)
+        {
+            return false;
+        }
+
+        if (result == MessageBoxResult.No)
+        {
+            if (discardChangesOnNo)
+            {
+                DiscardPendingLayoutChanges();
+            }
+
+            return true;
+        }
+
+        return await SaveToTargetAsync(Slugify(CurrentLayoutName), CurrentLayoutName, treatAsSaveAs: false, notifyOnSuccess: false);
+    }
+
+    private void DiscardPendingLayoutChanges()
+    {
+        _currentWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(_savedState.WorkspaceDocument);
+        _currentLayoutId = _savedState.LayoutId;
+        CurrentDocument = GetDisplayLayout(_currentWorkspaceDocument, SelectedDisplayItem?.Id);
+        SelectedNodeId = CurrentDocument.Root.Id;
+        SyncActiveSnapWithCurrentWorkspaceIfNeeded();
+        IsDirty = false;
+        ResetHistory();
+        RaisePropertyChanged(nameof(DisplayedLayoutName));
+        SaveSessionState();
+        SetStatusMessage("已放弃未保存的分区修改");
+    }
+
     private void ApplyEditorMutation(LayoutDocument document, string? selectedNodeId)
     {
         PushUndoState();
@@ -1607,16 +1647,19 @@ public sealed partial class MainViewModel : ObservableObject
         return string.IsNullOrWhiteSpace(value) ? "未命名布局" : value.Trim();
     }
 
+    private static string GetApplicationVersion()
+    {
+        var version = typeof(MainViewModel).Assembly.GetName().Version;
+        return version is null
+            ? "0.0.0"
+            : $"{version.Major}.{version.Minor}.{version.Build}";
+    }
+
     private static string? PromptForLayoutName(string title, string message, string initialValue)
     {
         var dialog = new LayoutNameDialog(title, message, initialValue);
         var owner = GetOwnerWindow();
-        if (owner is not null)
-        {
-            PrepareOwnerWindow(owner);
-            dialog.Owner = owner;
-            dialog.Topmost = owner.Topmost;
-        }
+        PrepareSecondaryDialog(dialog, owner);
 
         return dialog.ShowDialog() == true ? dialog.LayoutName : null;
     }
@@ -1664,6 +1707,24 @@ public sealed partial class MainViewModel : ObservableObject
 
         owner.Activate();
         owner.Focus();
+    }
+
+    private static void PrepareSecondaryDialog(Window dialog, Window? owner)
+    {
+        if (owner is null)
+        {
+            return;
+        }
+
+        PrepareOwnerWindow(owner);
+        if (owner is PaneWorks.App.MainWindow mainWindow)
+        {
+            mainWindow.PrepareSecondaryDialog(dialog);
+            return;
+        }
+
+        dialog.Owner = owner;
+        dialog.Topmost = owner.Topmost;
     }
 
     private static string Slugify(string value)
