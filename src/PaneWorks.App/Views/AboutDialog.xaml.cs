@@ -199,6 +199,10 @@ public partial class AboutDialog : System.Windows.Window
     {
         return ParseVersion(versionLabel) switch
         {
+            { Major: 0, Minor: 2, Build: 4 } =>
+                "· 工作区恢复更可靠：已绑定的文件夹会按原路径重新打开并吸附。\n" +
+                "· 多个资源管理器窗口同时存在时，减少误吸附到其他文件夹的情况。\n" +
+                "· 旧版工作区绑定兼容性增强，重新应用工作区时识别更准确。",
             { Major: 0, Minor: 2, Build: 3 } =>
                 "· 关于窗口新增当前版本要点与检查更新入口。\n" +
                 "· 主菜单、设置窗口与侧边悬浮条交互继续打磨。\n" +

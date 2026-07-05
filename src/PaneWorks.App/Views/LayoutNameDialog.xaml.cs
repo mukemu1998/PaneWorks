@@ -1,5 +1,5 @@
 using System.Windows;
-using WpfMessageBox = System.Windows.MessageBox;
+using System.Windows.Input;
 
 namespace PaneWorks.App.Views;
 
@@ -9,6 +9,7 @@ public partial class LayoutNameDialog : Window
     {
         InitializeComponent();
         Title = title;
+        TitleTextBlock.Text = title;
         MessageTextBlock.Text = message;
         NameTextBox.Text = initialValue;
         NameTextBox.SelectAll();
@@ -21,16 +22,38 @@ public partial class LayoutNameDialog : Window
     {
         if (string.IsNullOrWhiteSpace(LayoutName))
         {
-            var owner = Owner ?? this;
-            WpfMessageBox.Show(
-                owner,
-                "请输入布局名称。",
-                "PaneWorks",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            ErrorTextBlock.Visibility = Visibility.Visible;
+            NameTextBox.Focus();
             return;
         }
 
         DialogResult = true;
+    }
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        DialogResult = false;
+    }
+
+    private void HeaderDragArea_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 1 || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        DragMove();
+        e.Handled = true;
+    }
+
+    private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape)
+        {
+            return;
+        }
+
+        DialogResult = false;
+        e.Handled = true;
     }
 }

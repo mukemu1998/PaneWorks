@@ -3,40 +3,110 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="布局名称"
         Width="430"
-        Height="228"
-        WindowStartupLocation="CenterOwner"
+        MinWidth="430"
+        MaxWidth="430"
+        SizeToContent="Height"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
         ResizeMode="NoResize"
-        Background="#FF131A28">
-    <Grid Margin="22">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="14" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+        AllowsTransparency="True"
+        Background="Transparent"
+        TextElement.Foreground="{StaticResource PaneTextBrush}"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <Border Padding="18"
+            Background="#EE101219"
+            BorderBrush="#28FFFFFF"
+            BorderThickness="1"
+            CornerRadius="26">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="18" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="12" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="8" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="24" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-        <TextBlock x:Name="MessageTextBlock"
-                   FontSize="15"
-                   Foreground="#DCEAFF"
-                   TextWrapping="Wrap" />
+            <Border Grid.Row="0"
+                    Margin="-18,-18,-18,0"
+                    Padding="18,15,18,13"
+                    Background="#FA0B0E16"
+                    CornerRadius="26,26,0,0"
+                    MouseLeftButtonDown="HeaderDragArea_MouseLeftButtonDown">
+                <Grid Background="Transparent">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-        <TextBox x:Name="NameTextBox"
-                 Grid.Row="2"
-                 FontSize="18" />
+                    <TextBlock x:Name="TitleTextBlock"
+                               Grid.Column="0"
+                               VerticalAlignment="Center"
+                               FontSize="17"
+                               FontWeight="SemiBold"
+                               Foreground="#F7F8FF"
+                               Text="布局名称" />
 
-        <StackPanel Grid.Row="4"
-                    HorizontalAlignment="Right"
-                    Orientation="Horizontal">
-            <Button Width="92"
-                    Margin="0,0,10,0"
-                    IsCancel="True"
-                    Content="取消" />
-            <Button Width="92"
-                    Style="{StaticResource PrimaryButtonStyle}"
-                    IsDefault="True"
-                    Click="ConfirmButton_Click"
-                    Content="确定" />
-        </StackPanel>
-    </Grid>
+                    <Button Grid.Column="1"
+                            Width="36"
+                            Height="36"
+                            MinWidth="36"
+                            MinHeight="36"
+                            Margin="8,-4,0,-4"
+                            Style="{StaticResource CircleIconButtonStyle}"
+                            Click="CloseButton_Click"
+                            ToolTip="关闭">
+                        <Viewbox Width="14"
+                                 Height="14">
+                            <Path Data="M2,2 L14,14 M14,2 L2,14"
+                                  Stroke="{StaticResource PaneTextBrush}"
+                                  StrokeEndLineCap="Round"
+                                  StrokeStartLineCap="Round"
+                                  StrokeThickness="2.4" />
+                        </Viewbox>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <TextBlock x:Name="MessageTextBlock"
+                       Grid.Row="2"
+                       FontSize="14.5"
+                       Foreground="#DCEAFF"
+                       LineHeight="23"
+                       TextWrapping="Wrap" />
+
+            <TextBox x:Name="NameTextBox"
+                     Grid.Row="4"
+                     Height="48"
+                     FontSize="18"
+                     VerticalContentAlignment="Center" />
+
+            <TextBlock x:Name="ErrorTextBlock"
+                       Grid.Row="6"
+                       FontSize="13"
+                       Foreground="#FFFF9AA2"
+                       Text="请输入布局名称。"
+                       Visibility="Collapsed" />
+
+            <StackPanel Grid.Row="8"
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal">
+                <Button Width="96"
+                        MinWidth="96"
+                        Margin="0,0,10,0"
+                        IsCancel="True"
+                        Content="取消" />
+                <Button Width="96"
+                        MinWidth="96"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        IsDefault="True"
+                        Click="ConfirmButton_Click"
+                        Content="确定" />
+            </StackPanel>
+        </Grid>
+    </Border>
 </Window>

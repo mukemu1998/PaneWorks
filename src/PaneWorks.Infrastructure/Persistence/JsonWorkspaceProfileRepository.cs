@@ -1,6 +1,7 @@
 using System.Text.Json;
 using PaneWorks.Core.Abstractions;
 using PaneWorks.Core.Models;
+using PaneWorks.Core.Services;
 
 namespace PaneWorks.Infrastructure.Persistence;
 
@@ -146,27 +147,7 @@ public sealed class JsonWorkspaceProfileRepository : IWorkspaceProfileRepository
 
     private static List<WorkspaceWindowBinding> NormalizeBindings(IEnumerable<WorkspaceWindowBinding>? bindings)
     {
-        return bindings?
-            .Where(item =>
-                !string.IsNullOrWhiteSpace(item.DisplayId)
-                && !string.IsNullOrWhiteSpace(item.NodeId)
-                && !string.IsNullOrWhiteSpace(item.ProcessName))
-            .Select(item => item with
-            {
-                DisplayId = item.DisplayId.Trim(),
-                NodeId = item.NodeId.Trim(),
-                ProcessName = item.ProcessName.Trim(),
-                WindowTitleSnapshot = item.WindowTitleSnapshot?.Trim() ?? string.Empty,
-                ExecutablePath = item.ExecutablePath?.Trim() ?? string.Empty,
-                LaunchArguments = item.LaunchArguments?.Trim() ?? string.Empty,
-                WorkingDirectory = item.WorkingDirectory?.Trim() ?? string.Empty,
-                MatchKind = NormalizeToken(item.MatchKind, "Window"),
-                MatchMode = NormalizeToken(item.MatchMode, "Auto"),
-                LaunchTarget = item.LaunchTarget?.Trim() ?? string.Empty,
-                StackOrder = Math.Max(0, item.StackOrder)
-            })
-            .ToList()
-            ?? new List<WorkspaceWindowBinding>();
+        return WorkspaceWindowBindingNormalizer.NormalizeMany(bindings);
     }
 
     private static WorkspaceProfileDocument? ReadProfile(string path)
@@ -194,12 +175,6 @@ public sealed class JsonWorkspaceProfileRepository : IWorkspaceProfileRepository
     }
 
     private static string NormalizeName(string? value, string fallback)
-    {
-        var normalized = value?.Trim() ?? string.Empty;
-        return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
-    }
-
-    private static string NormalizeToken(string? value, string fallback)
     {
         var normalized = value?.Trim() ?? string.Empty;
         return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
