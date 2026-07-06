@@ -10,8 +10,7 @@ public sealed partial class MainViewModel
     public void OpenSettings()
     {
         var dialog = new SettingsDialog(_appSettings);
-        var owner = GetOwnerWindow();
-        PrepareSecondaryDialog(dialog, owner);
+        PaneMessageService.PrepareDialog(dialog);
 
         if (dialog.ShowDialog() != true || dialog.Result is null)
         {
@@ -48,8 +47,7 @@ public sealed partial class MainViewModel
     public void OpenAbout()
     {
         var dialog = new AboutDialog(AppVersionLabel);
-        var owner = GetOwnerWindow();
-        PrepareSecondaryDialog(dialog, owner);
+        PaneMessageService.PrepareDialog(dialog);
 
         _ = dialog.ShowDialog();
     }

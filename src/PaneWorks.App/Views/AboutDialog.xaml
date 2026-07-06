@@ -185,7 +185,7 @@
                                FontSize="13"
                                Foreground="#CDD3DF"
                                LineHeight="21"
-                               Text="PaneWorks 源码公开维护。具体授权、分发与二次开发规则以 GitHub 仓库中的 LICENSE 文件和 Release 说明为准；如当前仓库尚未附带 LICENSE，请在正式对外授权前补充。"
+                               Text="PaneWorks 采用 MIT License 开源。你可以在遵守 LICENSE 文件条款的前提下使用、复制、修改、分发和二次开发本项目。"
                                TextWrapping="Wrap" />
                 </StackPanel>
 

@@ -1,11 +1,9 @@
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using PaneWorks.Infrastructure.Windows;
-using WpfMessageBox = System.Windows.MessageBox;
 using DrawingIcon = System.Drawing.Icon;
 
 namespace PaneWorks.App.Views;
@@ -49,12 +47,11 @@ public partial class WindowBindingPickerDialog : Window
         if (SelectedWindow is null)
         {
             var owner = Owner ?? this;
-            WpfMessageBox.Show(
+            PaneMessageService.Show(
                 owner,
                 "请先选择一个要绑定的窗口。",
-                "PaneWorks",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                buttons: MessageBoxButton.OK,
+                image: MessageBoxImage.Information);
             return;
         }
 
@@ -92,7 +89,6 @@ public partial class WindowBindingPickerDialog : Window
             return null;
         }
 
-        IntPtr hIcon = IntPtr.Zero;
         try
         {
             using var extractedIcon = DrawingIcon.ExtractAssociatedIcon(executablePath);
@@ -101,10 +97,8 @@ public partial class WindowBindingPickerDialog : Window
                 return null;
             }
 
-            using var clonedIcon = (DrawingIcon)extractedIcon.Clone();
-            hIcon = clonedIcon.Handle;
             var source = Imaging.CreateBitmapSourceFromHIcon(
-                hIcon,
+                extractedIcon.Handle,
                 Int32Rect.Empty,
                 BitmapSizeOptions.FromWidthAndHeight(32, 32));
             source.Freeze();
@@ -114,18 +108,7 @@ public partial class WindowBindingPickerDialog : Window
         {
             return null;
         }
-        finally
-        {
-            if (hIcon != IntPtr.Zero)
-            {
-                _ = DestroyIcon(hIcon);
-            }
-        }
     }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DestroyIcon(IntPtr hIcon);
 
     private sealed class WindowBindingPickerItem
     {

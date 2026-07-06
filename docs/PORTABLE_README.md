@@ -18,6 +18,7 @@
 
 - `PaneWorks.exe`：主程序
 - `README.md`：当前这份快速使用说明
+- `LICENSE`：MIT 开源协议
 - `VERSION`：当前便携包版本号
 
 ## 使用提示

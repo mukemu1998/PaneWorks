@@ -1,4 +1,5 @@
 using System.Windows.Threading;
+using PaneWorks.App.Diagnostics;
 
 namespace PaneWorks.App;
 
@@ -28,10 +29,7 @@ public partial class MainWindow
         StopManualDetachedDragLoop();
         StopRuntimeLinkedResizeLoop();
         _snapAssistTimer.Stop();
-        _snapBindings.Clear();
-        _snapRuntimeBounds.Clear();
-        _snapWindowInfoCache.Clear();
-        _sessionSnapLayoutDocuments.Clear();
+        ClearSnapRuntimeCollections();
         _movingWindowHandle = IntPtr.Zero;
         _hoveredSnapRegion = null;
         _hoveredSnapDisplayId = null;
@@ -50,5 +48,39 @@ public partial class MainWindow
         _movingWindowDetachedFromSnapGroup = false;
         _movingWindowSnapResizeGesture = false;
         EnsureSnapOverlayHidden();
+    }
+
+    private void ClearSnapRuntimeCollections()
+    {
+        _snapBindings.Clear();
+        _snapRuntimeBounds.Clear();
+        _snapWindowInfoCache.Clear();
+        _sessionSnapLayoutDocuments.Clear();
+    }
+
+    private void ResetSnapSessionButton_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        ResetSnapRuntimeStateAfterLayoutSwitch();
+        ViewModel.SetUserStatusMessage("已重置当前会话吸附状态，保存的分区布局和工作区方案不受影响。");
+        PaneWorksLog.Info("Snap runtime session reset by user");
+    }
+
+    private void PauseSnapAssistButton_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_isSnapAssistPausedByUser)
+        {
+            _isSnapAssistPausedByUser = false;
+            EnsureSnapAssistStarted();
+            PauseSnapAssistButton.Content = "暂停吸附";
+            ViewModel.SetUserStatusMessage("已恢复窗口吸附待命。");
+            PaneWorksLog.Info("Snap assist resumed by user");
+            return;
+        }
+
+        _isSnapAssistPausedByUser = true;
+        DisarmSnapAssist(restoreWindow: false);
+        PauseSnapAssistButton.Content = "恢复吸附";
+        ViewModel.SetUserStatusMessage("已暂停窗口吸附。再次点击“恢复吸附”后继续待命。");
+        PaneWorksLog.Info("Snap assist paused by user");
     }
 }

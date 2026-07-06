@@ -7,13 +7,19 @@ namespace PaneWorks.App;
 
 public partial class MainWindow
 {
-    private int LaunchMissingWorkspaceWindows(IReadOnlyList<WorkspaceWindowBinding> bindings)
+    private WorkspaceLaunchResult LaunchMissingWorkspaceWindows(IReadOnlyList<WorkspaceWindowBinding> bindings)
     {
-        var launchedCount = 0;
+        var startedBindings = new List<WorkspaceWindowBinding>();
+        var skippedIssues = new List<WorkspaceRestoreIssue>();
+        var failedIssues = new List<WorkspaceRestoreIssue>();
         foreach (var binding in bindings)
         {
             if (!TryCreateWorkspaceLaunchInfo(binding, out var startInfo))
             {
+                skippedIssues.Add(new WorkspaceRestoreIssue(
+                    FormatWorkspaceBindingTarget(binding),
+                    ResolveWorkspaceLaunchSkipReason(binding)));
+                PaneWorksLog.Info($"Skip launch workspace binding: {binding.ProcessName}, target={binding.LaunchTarget}, file={binding.ExecutablePath}");
                 continue;
             }
 
@@ -21,15 +27,18 @@ public partial class MainWindow
             {
                 PaneWorksLog.Info($"Launch workspace binding: {binding.ProcessName}, file={startInfo.FileName}, args={startInfo.Arguments}");
                 Process.Start(startInfo);
-                launchedCount++;
+                startedBindings.Add(binding);
             }
             catch (Exception exception)
             {
+                failedIssues.Add(new WorkspaceRestoreIssue(
+                    FormatWorkspaceBindingTarget(binding),
+                    $"启动失败：{exception.Message}"));
                 PaneWorksLog.Error($"Launch workspace binding failed: {binding.ProcessName}", exception);
             }
         }
 
-        return launchedCount;
+        return new WorkspaceLaunchResult(startedBindings, skippedIssues, failedIssues);
     }
 
     private static bool TryCreateWorkspaceLaunchInfo(
@@ -121,5 +130,22 @@ public partial class MainWindow
         return string.IsNullOrWhiteSpace(value)
             ? string.Empty
             : $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+    }
+
+    private static string ResolveWorkspaceLaunchSkipReason(WorkspaceWindowBinding binding)
+    {
+        if (IsExplorerFolderBinding(binding))
+        {
+            return string.IsNullOrWhiteSpace(binding.LaunchTarget)
+                ? "缺少文件夹路径，无法自动打开。"
+                : $"文件夹路径不存在：{binding.LaunchTarget}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(binding.ExecutablePath) && !File.Exists(binding.ExecutablePath))
+        {
+            return $"程序路径不存在：{binding.ExecutablePath}";
+        }
+
+        return "缺少可用的程序路径或启动目标。";
     }
 }

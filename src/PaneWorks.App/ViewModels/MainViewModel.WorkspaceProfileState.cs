@@ -87,15 +87,15 @@ public sealed partial class MainViewModel
 
         foreach (var item in items)
         {
+            var health = BuildWorkspaceProfileHealth(item);
             WorkspaceProfiles.Add(new LayoutListItemViewModel
             {
                 Id = item.Id,
                 Name = item.Name,
-                Description = item.BindingCount <= 0
-                    ? $"空绑定  |  关联分区：{ResolveLayoutDisplayName(item.LayoutId)}"
-                    : $"已绑定 {item.BindingCount} 个窗口  |  关联分区：{ResolveLayoutDisplayName(item.LayoutId)}",
+                Description = health.Description,
                 IsEmptyWorkspaceBinding = item.BindingCount <= 0,
-                HasWorkspaceBinding = item.BindingCount > 0
+                HasWorkspaceBinding = item.BindingCount > 0 && !health.HasWarning,
+                HasWorkspaceWarning = health.HasWarning
             });
         }
 
@@ -144,18 +144,4 @@ public sealed partial class MainViewModel
         _exitWorkspaceBindingModeCommand?.RaiseCanExecuteChanged();
     }
 
-    private string ResolveLayoutDisplayName(string? layoutId)
-    {
-        if (string.IsNullOrWhiteSpace(layoutId))
-        {
-            return "未绑定分区布局";
-        }
-
-        var item = Layouts.FirstOrDefault(existing =>
-            string.Equals(existing.Id, layoutId, StringComparison.OrdinalIgnoreCase));
-
-        return item is null
-            ? $"{layoutId}.json（未找到）"
-            : item.Name;
-    }
 }

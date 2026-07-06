@@ -9,6 +9,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $appProject = Join-Path $repoRoot "src\PaneWorks.App\PaneWorks.App.csproj"
 $propsPath = Join-Path $repoRoot "Directory.Build.props"
 $portableReadme = Join-Path $repoRoot "docs\PORTABLE_README.md"
+$licenseFile = Join-Path $repoRoot "LICENSE"
 $dotnet = "C:\Program Files\dotnet\dotnet.exe"
 
 # Keep the portable bundle minimal and ready to unzip-run.
@@ -57,6 +58,9 @@ Write-Host "==> Publish self-contained single-file build"
 Write-Host "==> Prepare portable package"
 Copy-Item -LiteralPath (Join-Path $publishRoot "PaneWorks.App.exe") -Destination (Join-Path $packageRoot $publicExeName)
 Copy-Item -LiteralPath $portableReadme -Destination (Join-Path $packageRoot "README.md")
+if (Test-Path $licenseFile) {
+    Copy-Item -LiteralPath $licenseFile -Destination (Join-Path $packageRoot "LICENSE") -Force
+}
 Set-Content -LiteralPath (Join-Path $packageRoot "VERSION") -Value "v$version" -Encoding ASCII
 
 Write-Host "==> Create zip archive"

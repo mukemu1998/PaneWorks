@@ -513,6 +513,17 @@
                                                    Foreground="#58AFFF"
                                                    Text="{Binding ShortcutSummary}"
                                                    TextWrapping="Wrap" />
+                                        <WrapPanel Margin="0,14,0,0">
+                                            <Button x:Name="PauseSnapAssistButton"
+                                                    Margin="0,0,8,8"
+                                                    MinWidth="116"
+                                                    Click="PauseSnapAssistButton_Click"
+                                                    Content="暂停吸附" />
+                                            <Button Margin="0,0,0,8"
+                                                    MinWidth="150"
+                                                    Click="ResetSnapSessionButton_Click"
+                                                    Content="重置会话吸附" />
+                                        </WrapPanel>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -659,6 +670,9 @@
                                                 Command="{Binding ExitWorkspaceBindingModeCommand}"
                                                 Content="退出绑定" />
                                         <Button Margin="0,0,8,8"
+                                                Click="RefreshWorkspaceProfilesButton_Click"
+                                                Content="刷新状态" />
+                                        <Button Margin="0,0,8,8"
                                                 Command="{Binding SaveWorkspaceProfileCommand}"
                                                 Content="保存" />
                                         <Button Margin="0,0,8,8"
@@ -695,6 +709,9 @@
                                                                         </DataTrigger>
                                                                         <DataTrigger Binding="{Binding HasWorkspaceBinding}" Value="True">
                                                                             <Setter Property="Foreground" Value="#7DFFB2" />
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding HasWorkspaceWarning}" Value="True">
+                                                                            <Setter Property="Foreground" Value="#FFCC66" />
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>

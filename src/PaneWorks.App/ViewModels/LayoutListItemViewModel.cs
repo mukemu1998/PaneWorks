@@ -11,4 +11,6 @@ public sealed class LayoutListItemViewModel
     public bool IsEmptyWorkspaceBinding { get; init; }
 
     public bool HasWorkspaceBinding { get; init; }
+
+    public bool HasWorkspaceWarning { get; init; }
 }

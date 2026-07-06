@@ -157,6 +157,8 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="16" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="14" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <StackPanel>
@@ -247,7 +249,46 @@
                         </StackPanel>
                     </Border>
 
-                    <Grid Grid.Row="8"
+                    <Border Grid.Row="8"
+                            Padding="14"
+                            Margin="0,4,0,0"
+                            Background="#401B2230"
+                            BorderBrush="#2258AFFF"
+                            BorderThickness="1"
+                            CornerRadius="22">
+                        <StackPanel>
+                            <TextBlock FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Foreground="#F7F8FF"
+                                       Text="诊断与文件" />
+                            <TextBlock Margin="0,6,0,12"
+                                       Foreground="#AEB8C8"
+                                       Text="遇到吸附或工作区恢复问题时，可直接打开本地目录，或复制诊断信息用于反馈。"
+                                       TextWrapping="Wrap" />
+                            <UniformGrid Columns="2">
+                                <Button Margin="0,0,8,0"
+                                        Click="OpenConfigDirectoryButton_Click"
+                                        Content="配置目录" />
+                                <Button Margin="8,0,0,0"
+                                        Click="OpenLayoutsDirectoryButton_Click"
+                                        Content="布局目录" />
+                                <Button Margin="0,8,8,0"
+                                        Click="OpenLogsDirectoryButton_Click"
+                                        Content="日志目录" />
+                                <Button Margin="8,8,0,0"
+                                        Click="OpenLastWorkspaceRestoreReportButton_Click"
+                                        Content="恢复报告" />
+                                <Button Margin="0,8,8,0"
+                                        Click="CopyDiagnosticsButton_Click"
+                                        Content="复制诊断信息" />
+                                <Button Margin="8,8,0,0"
+                                        Click="ClearDiagnosticsButton_Click"
+                                        Content="清理诊断文件" />
+                            </UniformGrid>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid Grid.Row="10"
                           Margin="0,4,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />

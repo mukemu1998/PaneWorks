@@ -53,7 +53,10 @@ public partial class MainWindow
             RestoreRuntimeWorkspaceStackOrder(watchBindings);
             foreach (var match in matches)
             {
-                restoredBindingKeys.Add(GetBindingInstanceKey(match.Binding));
+                if (TryGetLiveRuntimeBindingHandle(match.Binding, out _))
+                {
+                    restoredBindingKeys.Add(GetBindingInstanceKey(match.Binding));
+                }
             }
             ScheduleWorkspaceStackOrderStabilization(watchBindings, "workspace-launch-restore");
 
@@ -95,20 +98,22 @@ public partial class MainWindow
                 }
 
                 var restoreBounds = ResolveRestoreBoundsForSnap(match.Window.Handle);
-                _snapBindings[match.Window.Handle] = new SnapBindingState(
-                    match.Binding.NodeId,
-                    match.Binding.DisplayId,
-                    restoreBounds);
-                _snapRuntimeBounds[match.Window.Handle] = region.Bounds;
-                _snapWindowInfoCache[match.Window.Handle] = match.Window;
-                _ = TrySnapWindowToBoundsWithStatus(match.Window.Handle, region.Bounds, "workspace-launch-restore");
-                ScheduleLaunchedWindowSnapStabilization(
-                    match.Window.Handle,
-                    match.Binding.DisplayId,
-                    match.Binding.NodeId,
-                    region.Bounds);
-                restoredCount++;
-                restoredMatches.Add(match);
+                if (TrySnapWindowToBoundsWithStatus(match.Window.Handle, region.Bounds, "workspace-launch-restore"))
+                {
+                    _snapBindings[match.Window.Handle] = new SnapBindingState(
+                        match.Binding.NodeId,
+                        match.Binding.DisplayId,
+                        restoreBounds);
+                    _snapRuntimeBounds[match.Window.Handle] = region.Bounds;
+                    _snapWindowInfoCache[match.Window.Handle] = match.Window;
+                    ScheduleLaunchedWindowSnapStabilization(
+                        match.Window.Handle,
+                        match.Binding.DisplayId,
+                        match.Binding.NodeId,
+                        region.Bounds);
+                    restoredCount++;
+                    restoredMatches.Add(match);
+                }
             }
         }
         finally

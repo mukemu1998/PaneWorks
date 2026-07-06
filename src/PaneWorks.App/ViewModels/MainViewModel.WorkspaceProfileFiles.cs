@@ -1,9 +1,5 @@
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
 using PaneWorks.Core.Models;
 
 namespace PaneWorks.App.ViewModels;
@@ -25,36 +21,12 @@ public sealed partial class MainViewModel
 
         var layoutId = SelectedLayoutItem.Id;
         var layoutName = SelectedLayoutItem.Name;
-        var defaultName = $"{layoutName} 工作区";
-        var enteredName = PromptForLayoutName("从选中的保存分区创建工作区", "请输入工作区名称。新工作区会关联当前选中的分区布局。", defaultName);
-        if (enteredName is null)
-        {
-            return;
-        }
-
-        var targetName = NormalizeLayoutName(enteredName);
-        var targetId = Slugify(targetName);
-        var profile = new WorkspaceProfileDocument(
-            2,
-            targetName,
+        await CreateWorkspaceProfileForLayoutAsync(
             layoutId,
-            new List<WorkspaceWindowBinding>());
-
-        _isSavingWorkspaceProfile = true;
-        SetStatusMessage("正在从选中的保存分区创建工作区...");
-
-        try
-        {
-            await SaveWorkspaceProfileToTargetAsync(
-                targetId,
-                profile,
-                previousId: null,
-                notifyOnSuccess: true);
-        }
-        finally
-        {
-            _isSavingWorkspaceProfile = false;
-        }
+            layoutName,
+            "从选中的保存分区创建工作区",
+            "请输入工作区名称。新工作区会关联当前选中的分区布局。",
+            "正在从选中的保存分区创建工作区...");
     }
 
     private async void CreateWorkspaceProfileFromActiveSnapLayout()
@@ -72,8 +44,23 @@ public sealed partial class MainViewModel
 
         var layoutId = _activeSnapLayoutId;
         var layoutName = _activeSnapLayoutName;
+        await CreateWorkspaceProfileForLayoutAsync(
+            layoutId,
+            layoutName,
+            "从当前吸附创建工作区",
+            "请输入工作区名称。当前吸附选择会作为这套工作区的分区基础。",
+            "正在从当前吸附创建工作区...");
+    }
+
+    private async Task CreateWorkspaceProfileForLayoutAsync(
+        string layoutId,
+        string layoutName,
+        string promptTitle,
+        string promptMessage,
+        string statusMessage)
+    {
         var defaultName = $"{layoutName} 工作区";
-        var enteredName = PromptForLayoutName("从当前吸附创建工作区", "请输入工作区名称。当前吸附选择会作为这套工作区的分区基础。", defaultName);
+        var enteredName = PromptForLayoutName(promptTitle, promptMessage, defaultName);
         if (enteredName is null)
         {
             return;
@@ -88,7 +75,7 @@ public sealed partial class MainViewModel
             new List<WorkspaceWindowBinding>());
 
         _isSavingWorkspaceProfile = true;
-        SetStatusMessage("正在从当前吸附创建工作区...");
+        SetStatusMessage(statusMessage);
 
         try
         {

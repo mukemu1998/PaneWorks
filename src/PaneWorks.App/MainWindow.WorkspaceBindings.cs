@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Interop;
 using PaneWorks.App.Diagnostics;
 using PaneWorks.App.Views;
-using WpfMessageBox = System.Windows.MessageBox;
 
 namespace PaneWorks.App;
 
@@ -12,23 +11,21 @@ public partial class MainWindow
     {
         if (!ViewModel.CanEditWorkspaceBindings)
         {
-            WpfMessageBox.Show(
+            PaneMessageService.Show(
                 this,
                 "请先选中工作区方案并点击“编辑绑定”，再给区域绑定窗口。",
-                "PaneWorks",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                buttons: MessageBoxButton.OK,
+                image: MessageBoxImage.Information);
             return;
         }
 
         if (!ViewModel.TryGetSelectedLeafRegion(out var displayId, out var nodeId))
         {
-            WpfMessageBox.Show(
+            PaneMessageService.Show(
                 this,
                 "请先点击一个区域，再给它绑定窗口。",
-                "PaneWorks",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                buttons: MessageBoxButton.OK,
+                image: MessageBoxImage.Information);
             return;
         }
 
@@ -40,12 +37,11 @@ public partial class MainWindow
 
         if (windows.Count == 0)
         {
-            WpfMessageBox.Show(
+            PaneMessageService.Show(
                 this,
                 "当前没有可绑定的桌面窗口。请先打开几个普通应用窗口再试。",
-                "PaneWorks",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                buttons: MessageBoxButton.OK,
+                image: MessageBoxImage.Information);
             return;
         }
 
@@ -67,21 +63,19 @@ public partial class MainWindow
                 dialog.SelectedWindow.ExplorerFolderPath,
                 out var message))
         {
-            WpfMessageBox.Show(
+            PaneMessageService.Show(
                 this,
                 message,
-                "PaneWorks",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                buttons: MessageBoxButton.OK,
+                image: MessageBoxImage.Information);
             return;
         }
 
-        WpfMessageBox.Show(
+        PaneMessageService.Show(
             this,
             $"{message} 点击“应用选中工作区”即可测试重新吸附，切换工作区时也会自动应用。",
-            "PaneWorks",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+            buttons: MessageBoxButton.OK,
+            image: MessageBoxImage.Information);
     }
 
     private async void AutoBindSnappedWindowsButton_Click(object sender, RoutedEventArgs e)
