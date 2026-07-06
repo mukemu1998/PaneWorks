@@ -284,8 +284,17 @@
                                                Foreground="#CDD3DF"
                                                Text="{Binding StatusLine}"
                                                TextWrapping="Wrap" />
-                                    <UniformGrid Margin="0,12,0,0"
-                                                 Columns="3">
+                                    <TextBlock Margin="0,14,0,0"
+                                               FontSize="14"
+                                               FontWeight="SemiBold"
+                                               Foreground="#F7F8FF"
+                                               Text="编辑操作指引" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               Foreground="#AEB8C8"
+                                               Text="先点击“新建分区”或“编辑当前选择”，也可以先选中一个已保存分区再点“打开编辑”，进入编辑后再按下面 3 步操作。"
+                                               TextWrapping="Wrap" />
+                                    <UniformGrid Margin="0,10,0,0"
+                                                  Columns="3">
                                         <Border Margin="0,0,8,0"
                                                 Padding="12"
                                                 Background="#1C2F80ED"
@@ -296,11 +305,11 @@
                                                 <TextBlock FontSize="13"
                                                            FontWeight="SemiBold"
                                                            Foreground="{StaticResource PaneTextBrush}"
-                                                           Text="1. 进入编辑后创建" />
+                                                           Text="1. 创建分割线" />
                                                 <TextBlock Margin="0,5,0,0"
                                                            FontSize="12"
                                                            Foreground="#D7E6FF"
-                                                           Text="进入编辑后在屏幕区域内右键，选择横向或纵向二等分、三等分。"
+                                                           Text="右键空白区域，选择横向或纵向二等分、三等分；后续还能继续右键切分。"
                                                            TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Border>
@@ -314,11 +323,11 @@
                                                 <TextBlock FontSize="13"
                                                            FontWeight="SemiBold"
                                                            Foreground="{StaticResource PaneTextBrush}"
-                                                           Text="2. 进入编辑后拖动" />
+                                                           Text="2. 拖动调比例" />
                                                 <TextBlock Margin="0,5,0,0"
                                                            FontSize="12"
                                                            Foreground="#D7E6FF"
-                                                           Text="进入编辑后拖动黄色分割线实时改比例，蓝色表示当前选中分割线。"
+                                                           Text="拖动黄色分割线实时调整区域大小，蓝色表示当前选中的分割线。"
                                                            TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Border>
@@ -332,11 +341,11 @@
                                                 <TextBlock FontSize="13"
                                                            FontWeight="SemiBold"
                                                            Foreground="{StaticResource PaneTextBrush}"
-                                                           Text="3. 进入编辑后删除" />
+                                                           Text="3. 删除分割线" />
                                                 <TextBlock Margin="0,5,0,0"
                                                            FontSize="12"
                                                            Foreground="#D7E6FF"
-                                                           Text="进入编辑后右键分割线选择删除，相邻区域会自动合并。"
+                                                           Text="右键分割线选择删除，相邻区域会自动合并成更大的可用区域。"
                                                            TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Border>
