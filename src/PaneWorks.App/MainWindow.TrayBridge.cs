@@ -92,5 +92,9 @@ public partial class MainWindow
         PaneWorksLog.Info("Prepare main window restore from tray");
         EnsureSnapOverlayHidden();
         RestoreWorkbenchFromSidebar();
+        Opacity = 0;
+        WindowState = System.Windows.WindowState.Normal;
+        EnsureMainWindowCoversVirtualDesktop();
+        UpdateWorkbenchPanelPosition();
     }
 }

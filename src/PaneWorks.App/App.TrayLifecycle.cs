@@ -35,7 +35,7 @@ public partial class App
             _mainWindow.PrepareForTrayRestore();
             _mainWindow.ShowInTaskbar = true;
             _mainWindow.Show();
-            _mainWindow.WindowState = Wpf.WindowState.Maximized;
+            _mainWindow.CompleteMainWindowPresentation();
             _mainWindow.Activate();
         });
     }
@@ -74,7 +74,7 @@ public partial class App
             _mainWindow.PrepareForTrayRestore();
             _mainWindow.ShowInTaskbar = true;
             _mainWindow.Show();
-            _mainWindow.WindowState = Wpf.WindowState.Maximized;
+            _mainWindow.CompleteMainWindowPresentation();
             _mainWindow.Close();
 
             if (_isExitRequested)

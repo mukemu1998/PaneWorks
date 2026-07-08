@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using PaneWorks.Core.Models;
 using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
 
@@ -9,11 +10,6 @@ public partial class MainWindow
 {
     private void UpdateWorkbenchPanelPosition()
     {
-        if (!IsLoaded)
-        {
-            return;
-        }
-
         var primaryDisplay = _displayDiscoveryService.GetPrimaryDisplay();
         var primaryDisplayDipBounds = DeviceRectToDipRect(primaryDisplay.Bounds);
         WorkbenchPanel.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -44,6 +40,7 @@ public partial class MainWindow
         _workbenchPanelDragStartPoint = e.GetPosition(this);
         _workbenchPanelDragStartOffsetX = WorkbenchPanelTranslate.X;
         _workbenchPanelDragStartOffsetY = WorkbenchPanelTranslate.Y;
+        BeginWorkbenchPanelDragVisualOptimization();
 
         if (sender is UIElement element)
         {
@@ -87,10 +84,26 @@ public partial class MainWindow
         }
 
         _isWorkbenchPanelDragging = false;
+        EndWorkbenchPanelDragVisualOptimization();
         if (sender is UIElement { IsMouseCaptured: true } element)
         {
             element.ReleaseMouseCapture();
         }
+    }
+
+    private void BeginWorkbenchPanelDragVisualOptimization()
+    {
+        _workbenchPanelOriginalCacheMode ??= WorkbenchPanel.CacheMode;
+        WorkbenchPanel.CacheMode = new BitmapCache
+        {
+            EnableClearType = false,
+            RenderAtScale = 1
+        };
+    }
+
+    private void EndWorkbenchPanelDragVisualOptimization()
+    {
+        WorkbenchPanel.CacheMode = _workbenchPanelOriginalCacheMode;
     }
 
     private void SetWorkbenchPanelDragOffset(double offsetX, double offsetY)

@@ -4,6 +4,7 @@ using PaneWorks.App.ViewModels;
 using PaneWorks.Core.Models;
 using PaneWorks.Core.Services;
 using PaneWorks.Infrastructure.Windows;
+using System.Windows.Media;
 using WpfPoint = System.Windows.Point;
 
 namespace PaneWorks.App;
@@ -62,6 +63,7 @@ public partial class MainWindow : Window
     private bool _movingWindowStartedByForegroundFallback;
     private bool _isSnapAssistPausedByUser;
     private bool _isWorkbenchPanelDragging;
+    private CacheMode? _workbenchPanelOriginalCacheMode;
     private WpfPoint _workbenchPanelDragStartPoint;
     private double _workbenchPanelDragStartOffsetX;
     private double _workbenchPanelDragStartOffsetY;
@@ -98,11 +100,13 @@ public partial class MainWindow : Window
         EditorCanvas.CanvasContextActionRequested += EditorCanvas_CanvasContextActionRequested;
         EditorCanvas.SnapLayoutSwitchRequested += EditorCanvas_SnapLayoutSwitchRequested;
         EditorCanvas.WorkspaceProfileSwitchRequested += EditorCanvas_WorkspaceProfileSwitchRequested;
+        SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
         StateChanged += MainWindow_StateChanged;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+        Opacity = 0;
     }
 
     private enum SnapAssistMode

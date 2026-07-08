@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using PaneWorks.App.Controls;
 using PaneWorks.App.Diagnostics;
 using PaneWorks.App.ViewModels;
@@ -12,6 +13,12 @@ namespace PaneWorks.App;
 
 public partial class MainWindow
 {
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        EnsureMainWindowCoversVirtualDesktop();
+        UpdateWorkbenchPanelPosition();
+    }
+
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainViewModel.SelectedDisplayItem))
@@ -187,6 +194,9 @@ public partial class MainWindow
         _windowMoveMonitor.MoveEnded += WindowMoveMonitor_MoveEnded;
         EnsureSnapAssistStarted();
         _snapAssistHealthTimer.Start();
+        Dispatcher.BeginInvoke(
+            () => Opacity = 1,
+            DispatcherPriority.Render);
         PaneWorksLog.Info("Main window loaded");
     }
 
@@ -198,5 +208,21 @@ public partial class MainWindow
             UpdateWorkbenchPanelPosition();
             EnsureSnapOverlayHidden();
         }
+    }
+
+    public void CompleteMainWindowPresentation()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(CompleteMainWindowPresentation);
+            return;
+        }
+
+        EnsureMainWindowCoversVirtualDesktop();
+        UpdateEditorStageBounds();
+        UpdateWorkbenchPanelPosition();
+        Dispatcher.BeginInvoke(
+            () => Opacity = 1,
+            DispatcherPriority.Render);
     }
 }
