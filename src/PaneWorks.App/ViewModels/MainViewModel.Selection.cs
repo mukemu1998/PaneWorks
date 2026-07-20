@@ -52,6 +52,14 @@ public sealed partial class MainViewModel
         }
     }
 
+    public void ClearSelectedWorkspaceProfile()
+    {
+        if (!IsWorkspaceBindingMode)
+        {
+            SelectedWorkspaceProfileItem = null;
+        }
+    }
+
     public DisplayItemViewModel? SelectedDisplayItem
     {
         get => _selectedDisplayItem;

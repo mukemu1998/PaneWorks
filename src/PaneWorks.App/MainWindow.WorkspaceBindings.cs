@@ -2,12 +2,13 @@ using System.Windows;
 using System.Windows.Interop;
 using PaneWorks.App.Diagnostics;
 using PaneWorks.App.Views;
+using PaneWorks.Infrastructure.Windows;
 
 namespace PaneWorks.App;
 
 public partial class MainWindow
 {
-    private void BindWindowButton_Click(object sender, RoutedEventArgs e)
+    private async void BindWindowButton_Click(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.CanEditWorkspaceBindings)
         {
@@ -29,53 +30,88 @@ public partial class MainWindow
             return;
         }
 
-        var windows = _workspaceApplyService
-            .GetVisibleWindows(new WindowInteropHelper(this).Handle)
-            .OrderBy(item => item.ProcessName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (windows.Count == 0)
+        try
         {
+            if (WindowBindingPickerOverlay.Visibility == Visibility.Visible)
+            {
+                return;
+            }
+
+            ViewModel.SetUserStatusMessage("正在读取可绑定的桌面窗口...");
+            var mainWindowHandle = new WindowInteropHelper(this).Handle;
+            PaneWorksLog.Info("Manual workspace bind: start collecting visible windows");
+            var windows = await Task.Run(() => _workspaceApplyService
+                .GetVisibleWindows(mainWindowHandle)
+                .OrderBy(item => item.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList());
+            PaneWorksLog.Info($"Manual workspace bind: collected {windows.Count} visible windows");
+
+            if (windows.Count == 0)
+            {
+                PaneMessageService.Show(
+                    this,
+                    "当前没有可绑定的桌面窗口。请先打开几个普通应用窗口再试。",
+                    buttons: MessageBoxButton.OK,
+                    image: MessageBoxImage.Information);
+                return;
+            }
+
+            _pendingWindowBindingDisplayId = displayId;
+            _pendingWindowBindingNodeId = nodeId;
+            WindowBindingPickerOverlay.Open(
+                windows,
+                $"当前区域：{nodeId}  |  当前屏幕：{ViewModel.CurrentDisplayName}",
+                FindSnappedWindowHandleForRegion(displayId, nodeId));
+            PaneWorksLog.Info("Manual workspace bind: picker overlay opened");
+        }
+        catch (Exception ex)
+        {
+            PaneWorksLog.Error("Manual workspace bind failed", ex);
             PaneMessageService.Show(
                 this,
-                "当前没有可绑定的桌面窗口。请先打开几个普通应用窗口再试。",
+                $"读取可绑定窗口失败：{ex.Message}",
                 buttons: MessageBoxButton.OK,
-                image: MessageBoxImage.Information);
-            return;
+                image: MessageBoxImage.Error);
         }
+    }
 
-        var dialog = new WindowBindingPickerDialog(
-            windows,
-            $"当前区域：{nodeId}  |  当前屏幕：{ViewModel.CurrentDisplayName}");
-        dialog.PreferredWindowHandle = FindSnappedWindowHandleForRegion(displayId, nodeId);
-        PrepareSecondaryDialog(dialog);
-
-        if (dialog.ShowDialog() != true || dialog.SelectedWindow is null)
+    private void WindowBindingPickerOverlay_BindingConfirmed(object? sender, EventArgs e)
+    {
+        if (WindowBindingPickerOverlay.SelectedWindow is not { } selectedWindow
+            || string.IsNullOrWhiteSpace(_pendingWindowBindingDisplayId)
+            || string.IsNullOrWhiteSpace(_pendingWindowBindingNodeId))
         {
             return;
         }
 
+        if (!string.Equals(ViewModel.SelectedDisplayItem?.Id, _pendingWindowBindingDisplayId, StringComparison.OrdinalIgnoreCase))
+        {
+            ViewModel.SelectDisplayForLayoutEditing(_pendingWindowBindingDisplayId);
+        }
+
+        ViewModel.SelectNode(_pendingWindowBindingNodeId);
+        ApplySelectedWindowBinding(selectedWindow);
+        _pendingWindowBindingDisplayId = null;
+        _pendingWindowBindingNodeId = null;
+    }
+
+    private void ApplySelectedWindowBinding(VisibleWindowInfo selectedWindow)
+    {
+        PaneWorksLog.Info($"Manual workspace bind: applying {selectedWindow.ProcessName}.exe");
         if (!ViewModel.TrySetSelectedRegionWindowBinding(
-                dialog.SelectedWindow.ProcessName,
-                dialog.SelectedWindow.Title,
-                dialog.SelectedWindow.ExecutablePath,
-                dialog.SelectedWindow.ExplorerFolderPath,
+                selectedWindow.ProcessName,
+                selectedWindow.Title,
+                selectedWindow.ExecutablePath,
+                selectedWindow.ExplorerFolderPath,
                 out var message))
         {
-            PaneMessageService.Show(
-                this,
-                message,
-                buttons: MessageBoxButton.OK,
-                image: MessageBoxImage.Information);
+            ViewModel.SetUserStatusMessage(message);
             return;
         }
 
-        PaneMessageService.Show(
-            this,
-            $"{message} 点击“应用选中工作区”即可测试重新吸附，切换工作区时也会自动应用。",
-            buttons: MessageBoxButton.OK,
-            image: MessageBoxImage.Information);
+        PaneWorksLog.Info("Manual workspace bind: queued background save");
+        ViewModel.SetUserStatusMessage($"{message} 可直接继续绑定其它区域，保存完成后会自动更新方案。 ");
     }
 
     private async void AutoBindSnappedWindowsButton_Click(object sender, RoutedEventArgs e)

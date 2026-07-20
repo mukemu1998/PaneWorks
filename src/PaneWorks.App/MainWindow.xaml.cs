@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Threading;
 using PaneWorks.App.ViewModels;
+using PaneWorks.App.Views;
 using PaneWorks.Core.Models;
 using PaneWorks.Core.Services;
 using PaneWorks.Infrastructure.Windows;
@@ -25,6 +26,8 @@ public partial class MainWindow : Window
     private readonly Dictionary<IntPtr, VisibleWindowInfo> _snapWindowInfoCache = new();
     private readonly Dictionary<string, LayoutDocument> _sessionSnapLayoutDocuments = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SnapOverlayWindow> _snapOverlayWindows = new(StringComparer.OrdinalIgnoreCase);
+    private string? _pendingWindowBindingDisplayId;
+    private string? _pendingWindowBindingNodeId;
     private readonly Dictionary<IntPtr, DateTimeOffset> _snapSuppressUntilByWindow = new();
     private PaneRect _virtualDesktopBounds;
     private IntPtr _movingWindowHandle;
@@ -105,6 +108,7 @@ public partial class MainWindow : Window
         EditorCanvas.CanvasContextActionRequested += EditorCanvas_CanvasContextActionRequested;
         EditorCanvas.SnapLayoutSwitchRequested += EditorCanvas_SnapLayoutSwitchRequested;
         EditorCanvas.WorkspaceProfileSwitchRequested += EditorCanvas_WorkspaceProfileSwitchRequested;
+        WindowBindingPickerOverlay.BindingConfirmed += WindowBindingPickerOverlay_BindingConfirmed;
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;

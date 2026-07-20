@@ -8,6 +8,16 @@ public partial class MainWindow
 {
     private void ActivateSelectedWorkspaceProfileButton_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.IsWorkspaceBindingMode)
+        {
+            PaneMessageService.Show(
+                this,
+                "请先退出“编辑绑定”，再切换并应用工作区方案。",
+                buttons: MessageBoxButton.OK,
+                image: MessageBoxImage.Information);
+            return;
+        }
+
         if (ViewModel.SelectedWorkspaceProfileItem is null)
         {
             PaneMessageService.Show(
@@ -41,6 +51,11 @@ public partial class MainWindow
 
     private void RefreshWorkspaceProfilesButton_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.IsWorkspaceBindingMode)
+        {
+            return;
+        }
+
         ViewModel.RefreshWorkspaceProfiles();
         ViewModel.SetUserStatusMessage("工作区方案状态已刷新。");
     }

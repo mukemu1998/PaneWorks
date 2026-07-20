@@ -62,8 +62,18 @@ public partial class MainWindow
         {
             if (!_snapWindowInfoCache.TryGetValue(item.Key, out var windowInfo))
             {
-                QueueSnappedWindowInfoCache(item.Key);
-                continue;
+                var excludedWindowHandle = new WindowInteropHelper(this).Handle;
+                if (!_workspaceApplyService.TryGetVisibleWindowInfo(
+                        item.Key,
+                        excludedWindowHandle,
+                        includeExplorerFolderPath: true,
+                        out windowInfo))
+                {
+                    QueueSnappedWindowInfoCache(item.Key);
+                    continue;
+                }
+
+                _snapWindowInfoCache[item.Key] = windowInfo;
             }
 
             requests.Add(new SnappedWorkspaceWindowBindingRequest(item.Value.DisplayId, item.Value.NodeId, windowInfo, 0));
@@ -87,6 +97,16 @@ public partial class MainWindow
         foreach (var request in requests)
         {
             var windowInfo = request.WindowInfo;
+            if (_workspaceApplyService.TryGetVisibleWindowInfo(
+                    windowInfo.Handle,
+                    excludedWindowHandle,
+                    includeExplorerFolderPath: true,
+                    out var refreshedWindowInfo))
+            {
+                // Refresh the capture so automatic binding keeps the executable path used by marker icons.
+                windowInfo = refreshedWindowInfo;
+            }
+
             if (IsExplorerProcess(windowInfo.ProcessName)
                 && string.IsNullOrWhiteSpace(windowInfo.ExplorerFolderPath)
                 && _workspaceApplyService.TryGetExplorerFolderPath(windowInfo.Handle, out var folderPath))

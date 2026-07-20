@@ -56,7 +56,6 @@ public sealed partial class WorkspaceApplyService
             || handle == context.ExcludedWindowHandle
             || handle == context.ShellWindow
             || !IsWindowVisible(handle)
-            || IsIconic(handle)
             || GetWindow(handle, GetWindowCommand.Owner) != IntPtr.Zero
             || IsToolWindow(handle)
             || IsCloaked(handle))

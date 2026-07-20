@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -10,6 +11,8 @@ namespace PaneWorks.App.Views;
 
 public partial class WindowBindingPickerDialog : Window
 {
+    public event EventHandler? BindingConfirmed;
+
     public WindowBindingPickerDialog(
         IReadOnlyList<VisibleWindowInfo> windows,
         string regionLabel)
@@ -18,7 +21,7 @@ public partial class WindowBindingPickerDialog : Window
         RegionTextBlock.Text = regionLabel;
 
         var items = windows
-            .Select(window => new WindowBindingPickerItem(window, TryLoadIcon(window.ExecutablePath)))
+            .Select(window => new WindowBindingPickerItem(window))
             .ToList();
 
         WindowListBox.ItemsSource = items;
@@ -55,7 +58,50 @@ public partial class WindowBindingPickerDialog : Window
             return;
         }
 
-        DialogResult = true;
+        BindingConfirmed?.Invoke(this, EventArgs.Empty);
+        Close();
+    }
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
+    private void HeaderDragArea_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 1 || e.LeftButton != System.Windows.Input.MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var source = e.OriginalSource as DependencyObject;
+        while (source is not null)
+        {
+            if (source is System.Windows.Controls.Primitives.ButtonBase)
+            {
+                return;
+            }
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        DragMove();
+        e.Handled = true;
+    }
+
+    private void WindowListBox_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (e.Delta < 0)
+        {
+            WindowListBox.SelectedIndex = Math.Min(WindowListBox.Items.Count - 1, WindowListBox.SelectedIndex + 1);
+        }
+        else
+        {
+            WindowListBox.SelectedIndex = Math.Max(0, WindowListBox.SelectedIndex - 1);
+        }
+
+        WindowListBox.ScrollIntoView(WindowListBox.SelectedItem);
+        e.Handled = true;
     }
 
     private void ApplyPreferredSelection()
@@ -110,12 +156,13 @@ public partial class WindowBindingPickerDialog : Window
         }
     }
 
-    private sealed class WindowBindingPickerItem
+    private sealed class WindowBindingPickerItem : System.ComponentModel.INotifyPropertyChanged
     {
-        public WindowBindingPickerItem(VisibleWindowInfo window, ImageSource? iconSource)
+        private ImageSource? _iconSource;
+
+        public WindowBindingPickerItem(VisibleWindowInfo window)
         {
             Window = window;
-            IconSource = iconSource;
             ProcessLabel = string.IsNullOrWhiteSpace(window.ExplorerFolderPath)
                 ? $"{window.ProcessName}.exe"
                 : $"{window.ProcessName}.exe · 文件夹";
@@ -132,7 +179,20 @@ public partial class WindowBindingPickerDialog : Window
 
         public VisibleWindowInfo Window { get; }
 
-        public ImageSource? IconSource { get; }
+        public ImageSource? IconSource
+        {
+            get => _iconSource;
+            set
+            {
+                if (ReferenceEquals(_iconSource, value))
+                {
+                    return;
+                }
+
+                _iconSource = value;
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(IconSource)));
+            }
+        }
 
         public string ProcessLabel { get; }
 
@@ -141,5 +201,7 @@ public partial class WindowBindingPickerDialog : Window
         public string ExecutablePath { get; }
 
         public string FallbackGlyph { get; }
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     }
 }

@@ -169,7 +169,7 @@ public sealed partial class EditorCanvasControl
 
     private bool TryRequestReferenceDisplayEdit(WpfPoint point)
     {
-        if (!IsLayoutEditingEnabled)
+        if (!IsLayoutEditingEnabled && !ShowWorkspaceBindingMarkers)
         {
             return false;
         }

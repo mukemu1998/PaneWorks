@@ -122,7 +122,9 @@ public sealed partial class MainViewModel
         RaisePropertyChanged(nameof(IsWorkspaceProfileEnabled));
         RaisePropertyChanged(nameof(WorkspaceProfileLabel));
         RaisePropertyChanged(nameof(CanEditWorkspaceBindings));
+        RaisePropertyChanged(nameof(CanSaveWorkspaceProfileChanges));
         RaisePropertyChanged(nameof(ActiveWorkspaceWindowBindings));
+        RefreshSelectedWorkspaceProfileBindingPreview();
         RaiseWindowBindingStatusChanged();
         UpdateWorkspaceBindingCommandStates();
     }
@@ -142,6 +144,11 @@ public sealed partial class MainViewModel
     {
         _beginWorkspaceBindingModeCommand?.RaiseCanExecuteChanged();
         _exitWorkspaceBindingModeCommand?.RaiseCanExecuteChanged();
+        (NewWorkspaceProfileCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (CreateWorkspaceProfileFromCurrentLayoutCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (SaveWorkspaceProfileCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (SaveAsWorkspaceProfileCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (DeleteSelectedWorkspaceProfileCommand as RelayCommand)?.RaiseCanExecuteChanged();
     }
 
 }

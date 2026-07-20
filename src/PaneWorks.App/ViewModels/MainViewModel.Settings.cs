@@ -22,14 +22,18 @@ public sealed partial class MainViewModel
             dialog.Result.RuntimeSessionModifierKey,
             dialog.Result.MinimizeShortcut,
             dialog.Result.LaunchAtStartup,
-            dialog.Result.AutoCheckForUpdates));
+            dialog.Result.AutoCheckForUpdates,
+            dialog.Result.LaunchElevatedAtStartup));
 
         try
         {
-            _startupRegistrationService.SetEnabled(updatedSettings.LaunchAtStartup);
+            _startupRegistrationService.SetEnabled(
+                updatedSettings.LaunchAtStartup,
+                updatedSettings.LaunchElevatedAtStartup);
             _appSettings = updatedSettings with
             {
-                LaunchAtStartup = _startupRegistrationService.IsEnabled()
+                LaunchAtStartup = _startupRegistrationService.IsEnabled(),
+                LaunchElevatedAtStartup = _startupRegistrationService.IsElevatedStartupEnabled()
             };
 
             _appSettingsRepository.Save(_appSettings);
@@ -59,7 +63,8 @@ public sealed partial class MainViewModel
         var actualStartupState = _startupRegistrationService.IsEnabled();
         var normalizedSettings = savedSettings with
         {
-            LaunchAtStartup = actualStartupState
+            LaunchAtStartup = actualStartupState,
+            LaunchElevatedAtStartup = actualStartupState && _startupRegistrationService.IsElevatedStartupEnabled()
         };
 
         if (!Equals(savedSettings, normalizedSettings))

@@ -98,6 +98,12 @@ public sealed partial class MainViewModel
             return;
         }
 
+        if (!IsWorkspaceBindingMode)
+        {
+            ShowErrorMessage("请先选中工作区方案并进入“编辑绑定”，再保存当前绑定修改。");
+            return;
+        }
+
         if (!IsWorkspaceProfileEnabled
             || _activeWorkspaceProfileDocument is null
             || string.IsNullOrWhiteSpace(_activeWorkspaceProfileId))
@@ -127,6 +133,12 @@ public sealed partial class MainViewModel
     {
         if (_isSavingWorkspaceProfile)
         {
+            return;
+        }
+
+        if (!IsWorkspaceBindingMode)
+        {
+            ShowErrorMessage("请先选中工作区方案并进入“编辑绑定”，再另存当前绑定方案。");
             return;
         }
 

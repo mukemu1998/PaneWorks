@@ -60,6 +60,12 @@ public sealed partial class MainViewModel
 
     private void DeleteSelectedWorkspaceProfile()
     {
+        if (IsWorkspaceBindingMode)
+        {
+            ShowErrorMessage("请先退出“编辑绑定”，再删除工作区方案。");
+            return;
+        }
+
         if (SelectedWorkspaceProfileItem is null)
         {
             return;

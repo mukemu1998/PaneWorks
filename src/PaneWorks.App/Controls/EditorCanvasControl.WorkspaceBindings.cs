@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -27,21 +28,51 @@ public sealed partial class EditorCanvasControl
             return;
         }
 
-        var currentDisplayId = BindingDisplayId ?? string.Empty;
-        foreach (var region in _lastGeometry.Regions)
+        DrawWorkspaceBindingMarkersForDisplay(
+            drawingContext,
+            BindingDisplayId ?? string.Empty,
+            _lastGeometry,
+            bindings);
+
+        foreach (var reference in ReferenceLayouts ?? [])
         {
-            var regionBindings = bindings
-                .Where(item =>
-                    string.Equals(item.DisplayId, currentDisplayId, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(item.NodeId, region.NodeId, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(item => item.StackOrder)
-                .ToList();
-            if (regionBindings.Count == 0)
+            if (string.IsNullOrWhiteSpace(reference.DisplayId)
+                || reference.StageBounds.Width <= 0
+                || reference.StageBounds.Height <= 0)
             {
                 continue;
             }
 
-            DrawBindingMarker(drawingContext, region.Bounds, regionBindings);
+            var referenceGeometry = _geometryCalculator.Compute(
+                reference.Document,
+                reference.StageBounds,
+                VisibleSplitterThickness);
+            DrawWorkspaceBindingMarkersForDisplay(
+                drawingContext,
+                reference.DisplayId,
+                referenceGeometry,
+                bindings);
+        }
+    }
+
+    private void DrawWorkspaceBindingMarkersForDisplay(
+        DrawingContext drawingContext,
+        string displayId,
+        LayoutGeometryResult geometry,
+        IReadOnlyList<WorkspaceWindowBinding> bindings)
+    {
+        foreach (var region in geometry.Regions)
+        {
+            var regionBindings = bindings
+                .Where(item =>
+                    string.Equals(item.DisplayId, displayId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.NodeId, region.NodeId, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(item => item.StackOrder)
+                .ToList();
+            if (regionBindings.Count > 0)
+            {
+                DrawBindingMarker(drawingContext, region.Bounds, regionBindings);
+            }
         }
     }
 
@@ -116,7 +147,11 @@ public sealed partial class EditorCanvasControl
         var path = binding.ExecutablePath?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
         {
-            return null;
+            path = TryResolveRunningProcessPath(binding.ProcessName);
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
         }
 
         if (_iconCache.TryGetValue(path, out var cached))
@@ -146,6 +181,36 @@ public sealed partial class EditorCanvasControl
             _iconCache[path] = null;
             return null;
         }
+    }
+
+    private static string TryResolveRunningProcessPath(string processName)
+    {
+        var normalizedName = NormalizeProcessLabel(processName);
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return string.Empty;
+        }
+
+        foreach (var process in Process.GetProcessesByName(normalizedName))
+        {
+            using (process)
+            {
+                try
+                {
+                    var path = process.MainModule?.FileName ?? string.Empty;
+                    if (System.IO.File.Exists(path))
+                    {
+                        return path;
+                    }
+                }
+                catch
+                {
+                    // Some elevated or protected processes do not expose their module path.
+                }
+            }
+        }
+
+        return string.Empty;
     }
 
     private static string NormalizeProcessLabel(string processName)

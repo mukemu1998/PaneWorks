@@ -240,10 +240,20 @@
                         <StackPanel>
                             <CheckBox x:Name="LaunchAtStartupCheckBox"
                                       Style="{StaticResource RoundedCheckBoxStyle}"
+                                      Checked="LaunchAtStartupCheckBox_Changed"
+                                      Unchecked="LaunchAtStartupCheckBox_Changed"
                                       Content="开机自动启动 PaneWorks" />
+                            <CheckBox x:Name="LaunchElevatedAtStartupCheckBox"
+                                      Margin="0,12,0,0"
+                                      Style="{StaticResource RoundedCheckBoxStyle}"
+                                      Checked="SettingsInputChanged"
+                                      Unchecked="SettingsInputChanged"
+                                      Content="开机时以管理员权限启动（需管理员身份保存）" />
                             <CheckBox x:Name="AutoCheckForUpdatesCheckBox"
                                       Margin="0,12,0,0"
                                       Style="{StaticResource RoundedCheckBoxStyle}"
+                                      Checked="SettingsInputChanged"
+                                      Unchecked="SettingsInputChanged"
                                       Content="启动时自动检查更新" />
                             <TextBlock x:Name="RecordingHintTextBlock"
                                        Margin="0,14,0,0"
@@ -312,9 +322,11 @@
                                     Margin="0,0,14,0"
                                     IsCancel="True"
                                     Content="取消" />
-                            <Button Width="118"
+                            <Button x:Name="SaveSettingsButton"
+                                    Width="118"
                                     Style="{StaticResource PrimaryButtonStyle}"
                                     IsDefault="True"
+                                    IsEnabled="False"
                                     Click="ConfirmButton_Click"
                                     Content="保存设置" />
                         </StackPanel>

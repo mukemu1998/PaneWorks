@@ -131,6 +131,10 @@ public sealed partial class MainViewModel
             RaisePropertyChanged(nameof(DesktopOverlayVisibility));
             RaisePropertyChanged(nameof(WorkspaceBindingModeLabel));
             RaisePropertyChanged(nameof(CanEditWorkspaceBindings));
+            RaisePropertyChanged(nameof(IsWorkspaceProfileListSelectionEnabled));
+            RaisePropertyChanged(nameof(CanEnterWorkspaceBindingMode));
+            RaisePropertyChanged(nameof(CanManageSelectedWorkspaceProfile));
+            RaisePropertyChanged(nameof(CanSaveWorkspaceProfileChanges));
             RaiseWindowBindingStatusChanged();
             UpdateWorkspaceBindingCommandStates();
         }

@@ -80,7 +80,8 @@ public sealed partial class MainViewModel
 
     public void SelectDisplayForLayoutEditing(string displayId)
     {
-        if (!IsLayoutEditMode || !TryGetDisplayById(displayId, out var display))
+        if ((!IsLayoutEditMode && !IsWorkspaceBindingMode)
+            || !TryGetDisplayById(displayId, out var display))
         {
             return;
         }
@@ -92,7 +93,9 @@ public sealed partial class MainViewModel
 
         ActivateDisplay(display.Id, resetHistory: true);
         SaveSessionState();
-        SetStatusMessage($"正在编辑{display.Name}的分区布局");
+        SetStatusMessage(IsWorkspaceBindingMode
+            ? $"正在为{display.Name}的区域编辑窗口绑定"
+            : $"正在编辑{display.Name}的分区布局");
     }
 
     private void RefreshDisplays()

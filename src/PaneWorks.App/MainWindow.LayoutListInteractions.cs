@@ -16,13 +16,13 @@ public partial class MainWindow
 {
     private void MainWindow_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (ViewModel.IsLayoutEditMode
-            || IsInteractiveMenuElement(e.OriginalSource as DependencyObject))
+        if (IsInteractiveMenuElement(e.OriginalSource as DependencyObject))
         {
             return;
         }
 
         ViewModel.ClearSelectedLayout();
+        ViewModel.ClearSelectedWorkspaceProfile();
     }
 
     private static bool IsInteractiveMenuElement(DependencyObject? source)

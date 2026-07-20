@@ -12,7 +12,9 @@ public sealed partial class MainViewModel
         out string message)
     {
         message = string.Empty;
-        if (!CanEditWorkspaceBindings || _activeWorkspaceProfileDocument is null)
+        if (!CanEditWorkspaceBindings
+            || _activeWorkspaceProfileDocument is null
+            || string.IsNullOrWhiteSpace(_activeWorkspaceProfileId))
         {
             message = "请先选中工作区方案并点击“编辑绑定”，再给区域绑定窗口。";
             return false;
@@ -41,30 +43,29 @@ public sealed partial class MainViewModel
         var isExplorerFolder = IsExplorerProcess(normalizedProcessName)
             && !string.IsNullOrWhiteSpace(normalizedExplorerFolderPath);
 
-        _activeWorkspaceProfileDocument = ReplaceWindowBindingsForRegion(
-            _activeWorkspaceProfileDocument,
-            new WorkspaceWindowBinding(
-                displayId,
-                nodeId,
-                normalizedProcessName,
-                windowTitleSnapshot.Trim(),
-                executablePath.Trim(),
-                string.Empty,
-                isExplorerFolder ? normalizedExplorerFolderPath : string.Empty,
-                isExplorerFolder ? "ExplorerFolder" : "Window",
-                isExplorerFolder ? "FolderPath" : "Auto",
-                isExplorerFolder ? normalizedExplorerFolderPath : string.Empty));
-
-        if (!TrySaveActiveWorkspaceProfileDocument(out var saveMessage))
-        {
-            message = saveMessage;
-            return false;
-        }
+        _activeWorkspaceProfileDocument = NormalizeWorkspaceProfile(
+            ReplaceWindowBindingsForRegion(
+                _activeWorkspaceProfileDocument,
+                new WorkspaceWindowBinding(
+                    displayId,
+                    nodeId,
+                    normalizedProcessName,
+                    windowTitleSnapshot.Trim(),
+                    executablePath.Trim(),
+                    string.Empty,
+                    isExplorerFolder ? normalizedExplorerFolderPath : string.Empty,
+                    isExplorerFolder ? "ExplorerFolder" : "Window",
+                    isExplorerFolder ? "FolderPath" : "Auto",
+                    isExplorerFolder ? normalizedExplorerFolderPath : string.Empty)));
 
         RaiseWindowBindingStatusChanged();
         message = isExplorerFolder
-            ? $"当前区域已绑定并保存到文件夹：{normalizedExplorerFolderPath}"
-            : $"当前区域已绑定并保存到 {normalizedProcessName}.exe。";
+            ? $"当前区域已绑定文件夹：{normalizedExplorerFolderPath}，正在后台保存"
+            : $"当前区域已绑定 {normalizedProcessName}.exe，正在后台保存";
+        SaveWorkspaceProfileDocumentInBackground(
+            _activeWorkspaceProfileId,
+            _activeWorkspaceProfileDocument,
+            $"工作区“{_activeWorkspaceProfileName}”绑定已保存");
         return true;
     }
 

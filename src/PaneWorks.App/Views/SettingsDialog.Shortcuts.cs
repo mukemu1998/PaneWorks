@@ -105,6 +105,7 @@ public partial class SettingsDialog
         RecordRuntimeSessionShortcutButton.Content = "开始录制";
         RecordMinimizeShortcutButton.Content = "开始录制";
         RecordingHintTextBlock.Text = hint;
+        UpdateSaveButtonState();
     }
 
     private enum RecordingTarget

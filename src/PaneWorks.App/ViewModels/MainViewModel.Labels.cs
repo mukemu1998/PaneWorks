@@ -20,7 +20,9 @@ public sealed partial class MainViewModel
         ? "已进入分区编辑：可在桌面覆盖层右键创建分割线、拖动调整比例、右键删除分割。完成后保存或退出编辑。"
         : "主菜单默认只选择吸附布局；需要修改分割线时，先点击“新建分区”“编辑当前选择”或列表里的“打开编辑”，进入编辑后再操作桌面分区。";
 
-    public string WorkspaceBindingModeLabel => IsWorkspaceBindingMode ? "正在选择绑定区域" : "未进入绑定模式";
+    public string WorkspaceBindingModeLabel => IsWorkspaceBindingMode
+        ? $"正在编辑“{ActiveWorkspaceProfileName}”：点击桌面区域后绑定窗口；完成后保存或退出绑定。"
+        : "先选中一个工作区方案，再点击“编辑绑定”；进入后方案列表会锁定，避免误改其他方案。";
 
     public bool CanEditWorkspaceBindings => IsWorkspaceBindingMode && IsWorkspaceProfileEnabled;
 

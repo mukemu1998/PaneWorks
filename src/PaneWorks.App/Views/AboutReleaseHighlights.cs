@@ -6,6 +6,10 @@ public static class AboutReleaseHighlights
     {
         return ParseVersion(versionLabel) switch
         {
+            { Major: 0, Minor: 2, Build: 7 } =>
+                "· 工作区绑定可直接在多屏区域间切换编辑，手动选择窗口后会显示软件图标并支持最小化窗口。\n" +
+                "· 绑定保存改为后台处理，完成绑定后可以继续编辑，不再阻塞主界面。\n" +
+                "· 设置页仅在实际修改快捷键、启动或更新选项后才启用保存按钮。",
             { Major: 0, Minor: 2, Build: 6 } =>
                 "· 新增自动更新：可在设置中开启启动检查，确认后会自动下载、校验并完成覆盖更新。\n" +
                 "· 多屏编辑更直观：点击目标屏幕即可切换编辑，当前编辑屏幕会显示醒目的边界与顶部标识。\n" +

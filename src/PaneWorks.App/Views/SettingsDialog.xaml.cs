@@ -11,10 +11,18 @@ public partial class SettingsDialog : System.Windows.Window
     private string _snapShortcut;
     private string _runtimeSessionShortcut;
     private string _minimizeShortcut;
+    private readonly string _initialSnapShortcut;
+    private readonly string _initialRuntimeSessionShortcut;
+    private readonly string _initialMinimizeShortcut;
+    private readonly bool _initialLaunchAtStartup;
+    private readonly bool _initialLaunchElevatedAtStartup;
+    private readonly bool _initialAutoCheckForUpdates;
+    private bool _isInitializing;
 
     public SettingsDialog(AppSettings settings)
     {
         InitializeComponent();
+        _isInitializing = true;
 
         _snapShortcut = ShortcutGestureHelper.NormalizeShortcut(
             settings.SnapModifierKey,
@@ -25,12 +33,22 @@ public partial class SettingsDialog : System.Windows.Window
         _minimizeShortcut = ShortcutGestureHelper.NormalizeShortcut(
             settings.MinimizeShortcut,
             ShortcutGestureHelper.NormalizeShortcut(AppSettings.Default.MinimizeShortcut, "Esc"));
+        _initialSnapShortcut = _snapShortcut;
+        _initialRuntimeSessionShortcut = _runtimeSessionShortcut;
+        _initialMinimizeShortcut = _minimizeShortcut;
+        _initialLaunchAtStartup = settings.LaunchAtStartup;
+        _initialLaunchElevatedAtStartup = settings.LaunchAtStartup && settings.LaunchElevatedAtStartup;
+        _initialAutoCheckForUpdates = settings.AutoCheckForUpdates;
 
         SnapModifierTextBox.Text = _snapShortcut;
         RuntimeSessionShortcutTextBox.Text = _runtimeSessionShortcut;
         MinimizeShortcutTextBox.Text = _minimizeShortcut;
         LaunchAtStartupCheckBox.IsChecked = settings.LaunchAtStartup;
+        LaunchElevatedAtStartupCheckBox.IsChecked = settings.LaunchElevatedAtStartup;
+        UpdateElevatedStartupOption();
         AutoCheckForUpdatesCheckBox.IsChecked = settings.AutoCheckForUpdates;
+        _isInitializing = false;
+        UpdateSaveButtonState();
     }
 
     public SettingsDialogResult? Result { get; private set; }
@@ -68,10 +86,52 @@ public partial class SettingsDialog : System.Windows.Window
             _minimizeShortcut,
             ShortcutGestureHelper.NormalizeShortcut(AppSettings.Default.MinimizeShortcut, "Esc"));
         var launchAtStartup = LaunchAtStartupCheckBox.IsChecked == true;
+        var launchElevatedAtStartup = launchAtStartup && LaunchElevatedAtStartupCheckBox.IsChecked == true;
         var autoCheckForUpdates = AutoCheckForUpdatesCheckBox.IsChecked == true;
 
-        Result = new SettingsDialogResult(snapShortcut, runtimeSessionShortcut, minimizeShortcut, launchAtStartup, autoCheckForUpdates);
+        Result = new SettingsDialogResult(snapShortcut, runtimeSessionShortcut, minimizeShortcut, launchAtStartup, autoCheckForUpdates, launchElevatedAtStartup);
         DialogResult = true;
+    }
+
+    private void LaunchAtStartupCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        UpdateElevatedStartupOption();
+        UpdateSaveButtonState();
+    }
+
+    private void SettingsInputChanged(object sender, RoutedEventArgs e)
+    {
+        UpdateSaveButtonState();
+    }
+
+    private void UpdateElevatedStartupOption()
+    {
+        var isEnabled = LaunchAtStartupCheckBox.IsChecked == true;
+        LaunchElevatedAtStartupCheckBox.IsEnabled = isEnabled;
+        if (!isEnabled)
+        {
+            LaunchElevatedAtStartupCheckBox.IsChecked = false;
+        }
+    }
+
+    private void UpdateSaveButtonState()
+    {
+        if (_isInitializing || SaveSettingsButton is null)
+        {
+            return;
+        }
+
+        var launchAtStartup = LaunchAtStartupCheckBox.IsChecked == true;
+        var launchElevatedAtStartup = launchAtStartup && LaunchElevatedAtStartupCheckBox.IsChecked == true;
+        var autoCheckForUpdates = AutoCheckForUpdatesCheckBox.IsChecked == true;
+        var hasChanges = !string.Equals(_snapShortcut, _initialSnapShortcut, StringComparison.Ordinal)
+            || !string.Equals(_runtimeSessionShortcut, _initialRuntimeSessionShortcut, StringComparison.Ordinal)
+            || !string.Equals(_minimizeShortcut, _initialMinimizeShortcut, StringComparison.Ordinal)
+            || launchAtStartup != _initialLaunchAtStartup
+            || launchElevatedAtStartup != _initialLaunchElevatedAtStartup
+            || autoCheckForUpdates != _initialAutoCheckForUpdates;
+
+        SaveSettingsButton.IsEnabled = hasChanges;
     }
 
     private static bool IsButtonSource(DependencyObject? source)
@@ -96,4 +156,5 @@ public sealed record SettingsDialogResult(
     string RuntimeSessionModifierKey,
     string MinimizeShortcut,
     bool LaunchAtStartup,
-    bool AutoCheckForUpdates);
+    bool AutoCheckForUpdates,
+    bool LaunchElevatedAtStartup);
