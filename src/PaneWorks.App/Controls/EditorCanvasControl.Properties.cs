@@ -62,6 +62,20 @@ public sealed partial class EditorCanvasControl
             typeof(EditorCanvasControl),
             new FrameworkPropertyMetadata(default(PaneRect), FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty WorkAreaBoundsProperty =
+        DependencyProperty.Register(
+            nameof(WorkAreaBounds),
+            typeof(PaneRect),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(default(PaneRect), FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty EditingDisplayNameProperty =
+        DependencyProperty.Register(
+            nameof(EditingDisplayName),
+            typeof(string),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(string.Empty, FrameworkPropertyMetadataOptions.AffectsRender));
+
     public static readonly DependencyProperty ReferenceLayoutsProperty =
         DependencyProperty.Register(
             nameof(ReferenceLayouts),
@@ -143,6 +157,18 @@ public sealed partial class EditorCanvasControl
     {
         get => (PaneRect)GetValue(StageBoundsProperty);
         set => SetValue(StageBoundsProperty, value);
+    }
+
+    public PaneRect WorkAreaBounds
+    {
+        get => (PaneRect)GetValue(WorkAreaBoundsProperty);
+        set => SetValue(WorkAreaBoundsProperty, value);
+    }
+
+    public string EditingDisplayName
+    {
+        get => (string)GetValue(EditingDisplayNameProperty);
+        set => SetValue(EditingDisplayNameProperty, value);
     }
 
     public IEnumerable<EditorReferenceLayout>? ReferenceLayouts

@@ -46,6 +46,8 @@ public sealed partial class EditorCanvasControl
 
         var candidates = new List<double>();
 
+        AddWorkAreaEdgeCandidates(activeSplitter, candidates);
+
         foreach (var splitter in _lastGeometry.Splitters)
         {
             if (splitter.SplitNodeId == activeSplitter.SplitNodeId)
@@ -92,6 +94,42 @@ public sealed partial class EditorCanvasControl
 
                     return distinct;
                 });
+    }
+
+    private void AddWorkAreaEdgeCandidates(ComputedSplitter activeSplitter, ICollection<double> candidates)
+    {
+        var stageBounds = GetDesktopStageBounds();
+        if (WorkAreaBounds.Width <= 0 || WorkAreaBounds.Height <= 0)
+        {
+            return;
+        }
+
+        if (activeSplitter.Direction == SplitDirection.Horizontal)
+        {
+            if (WorkAreaBounds.Y > stageBounds.Y && WorkAreaBounds.Y < stageBounds.Y + stageBounds.Height)
+            {
+                candidates.Add(WorkAreaBounds.Y);
+            }
+
+            var bottom = WorkAreaBounds.Y + WorkAreaBounds.Height;
+            if (bottom > stageBounds.Y && bottom < stageBounds.Y + stageBounds.Height)
+            {
+                candidates.Add(bottom);
+            }
+
+            return;
+        }
+
+        if (WorkAreaBounds.X > stageBounds.X && WorkAreaBounds.X < stageBounds.X + stageBounds.Width)
+        {
+            candidates.Add(WorkAreaBounds.X);
+        }
+
+        var right = WorkAreaBounds.X + WorkAreaBounds.Width;
+        if (right > stageBounds.X && right < stageBounds.X + stageBounds.Width)
+        {
+            candidates.Add(right);
+        }
     }
 
     private void SetSnapGuide(SplitDirection direction, double axisPosition)

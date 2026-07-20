@@ -14,6 +14,7 @@ public static class PaneMessageService
     {
         var dialog = new PaneMessageDialog(title, message, buttons, image);
         PrepareDialog(dialog, owner);
+        dialog.Topmost = true;
 
         _ = dialog.ShowDialog();
         return dialog.Result == MessageBoxResult.None

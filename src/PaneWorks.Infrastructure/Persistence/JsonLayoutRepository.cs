@@ -173,7 +173,10 @@ public sealed class JsonLayoutRepository : ILayoutRepository
         {
             DisplayLayouts = document.DisplayLayouts is null
                 ? new Dictionary<string, LayoutDocument>(StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, LayoutDocument>(document.DisplayLayouts, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, LayoutDocument>(document.DisplayLayouts, StringComparer.OrdinalIgnoreCase),
+            DisplaySnapshots = document.DisplaySnapshots is null
+                ? new Dictionary<string, WorkspaceDisplaySnapshot>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, WorkspaceDisplaySnapshot>(document.DisplaySnapshots, StringComparer.OrdinalIgnoreCase)
         };
     }
 

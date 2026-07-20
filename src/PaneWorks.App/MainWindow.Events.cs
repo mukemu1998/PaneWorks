@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -13,6 +14,13 @@ namespace PaneWorks.App;
 
 public partial class MainWindow
 {
+    private const int StartupDisplayReconcileAttempts = 180;
+    private const int StartupDisplayStableSamplesRequired = 3;
+    private static readonly TimeSpan StartupDisplayReconcileInitialDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan StartupDisplayReconcileRetryDelay = TimeSpan.FromSeconds(1);
+    private string? _lastStartupDisplayTopologyFingerprint;
+    private int _startupDisplayStableSamples;
+
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
     {
         EnsureMainWindowCoversVirtualDesktop();
@@ -41,6 +49,11 @@ public partial class MainWindow
     private void EditorCanvas_SplitterRatioChanged(object? sender, SplitterRatioChangedEventArgs e)
     {
         ViewModel.UpdateSplitRatio(e.SplitNodeId, e.Ratio);
+    }
+
+    private void EditorCanvas_DisplayEditRequested(object? sender, DisplayEditRequestedEventArgs e)
+    {
+        ViewModel.SelectDisplayForLayoutEditing(e.DisplayId);
     }
 
     private void EditorCanvas_CanvasContextActionRequested(object? sender, CanvasContextActionRequestedEventArgs e)
@@ -194,6 +207,7 @@ public partial class MainWindow
         _windowMoveMonitor.MoveEnded += WindowMoveMonitor_MoveEnded;
         EnsureSnapAssistStarted();
         _snapAssistHealthTimer.Start();
+        _ = ReconcileStartupDisplaysAsync();
         Dispatcher.BeginInvoke(
             () => Opacity = 1,
             DispatcherPriority.Render);
@@ -224,5 +238,69 @@ public partial class MainWindow
         Dispatcher.BeginInvoke(
             () => Opacity = 1,
             DispatcherPriority.Render);
+    }
+
+    private async Task ReconcileStartupDisplaysAsync()
+    {
+        for (var attempt = 0; attempt < StartupDisplayReconcileAttempts; attempt++)
+        {
+            await Task.Delay(attempt == 0
+                ? StartupDisplayReconcileInitialDelay
+                : StartupDisplayReconcileRetryDelay);
+
+            if (!IsLoaded || !IsVisible)
+            {
+                return;
+            }
+
+            if (ViewModel.IsLayoutEditMode || ViewModel.IsWorkspaceBindingMode || ViewModel.IsDirty)
+            {
+                return;
+            }
+
+            var topologyFingerprint = GetCurrentDisplayTopologyFingerprint();
+            if (!string.Equals(
+                    topologyFingerprint,
+                    _lastStartupDisplayTopologyFingerprint,
+                    StringComparison.Ordinal))
+            {
+                _lastStartupDisplayTopologyFingerprint = topologyFingerprint;
+                _startupDisplayStableSamples = 1;
+                continue;
+            }
+
+            _startupDisplayStableSamples++;
+            if (_startupDisplayStableSamples < StartupDisplayStableSamplesRequired)
+            {
+                continue;
+            }
+
+            if (!ViewModel.ReconcileDisplaysAfterStartup())
+            {
+                continue;
+            }
+
+            UpdateEditorStageBounds();
+            UpdateWorkbenchPanelPosition();
+            PaneWorksLog.Info($"Startup display reconciliation applied on attempt {attempt + 1}");
+        }
+    }
+
+    private string GetCurrentDisplayTopologyFingerprint()
+    {
+        return string.Join(
+            ";",
+            _displayDiscoveryService
+                .GetDisplays()
+                .OrderBy(display => display.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(display => string.Join(
+                    "|",
+                    display.Id,
+                    display.Bounds.X,
+                    display.Bounds.Y,
+                    display.Bounds.Width,
+                    display.Bounds.Height,
+                    display.IsPrimary,
+                    display.Orientation)));
     }
 }

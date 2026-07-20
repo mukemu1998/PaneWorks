@@ -6,6 +6,8 @@ namespace PaneWorks.Infrastructure.Windows;
 
 public sealed class DisplayDiscoveryService
 {
+    private readonly DisplayIdentityResolver _identityResolver = new();
+
     public IReadOnlyList<DisplayInfo> GetDisplays()
     {
         var screens = Screen.AllScreens
@@ -26,7 +28,8 @@ public sealed class DisplayDiscoveryService
                 name,
                 ToPaneRect(screen.Bounds),
                 ToPaneRect(screen.WorkingArea),
-                screen.Primary));
+                screen.Primary,
+                GetOrientation(screen.Bounds)));
         }
 
         return displays;
@@ -79,12 +82,20 @@ public sealed class DisplayDiscoveryService
             screen.Primary ? "主屏幕" : screen.DeviceName,
             ToPaneRect(screen.Bounds),
             ToPaneRect(screen.WorkingArea),
-            screen.Primary);
+            screen.Primary,
+            GetOrientation(screen.Bounds));
     }
 
-    private static string GetId(Screen screen)
+    private string GetId(Screen screen)
     {
-        return screen.DeviceName;
+        return _identityResolver.GetPhysicalId(screen);
+    }
+
+    private static WorkspaceDisplayOrientation GetOrientation(Rectangle bounds)
+    {
+        return bounds.Height > bounds.Width
+            ? WorkspaceDisplayOrientation.Portrait
+            : WorkspaceDisplayOrientation.Landscape;
     }
 
     private static PaneRect ToPaneRect(Rectangle rectangle)

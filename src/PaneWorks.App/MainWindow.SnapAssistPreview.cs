@@ -95,6 +95,12 @@ public partial class MainWindow
             selectedDisplayDipBounds.Y - _virtualDesktopBounds.Y,
             selectedDisplayDipBounds.Width,
             selectedDisplayDipBounds.Height);
+        var selectedWorkAreaDipBounds = DeviceRectToDipRect(selectedDisplay.WorkArea);
+        EditorCanvas.WorkAreaBounds = new PaneRect(
+            selectedWorkAreaDipBounds.X - _virtualDesktopBounds.X,
+            selectedWorkAreaDipBounds.Y - _virtualDesktopBounds.Y,
+            selectedWorkAreaDipBounds.Width,
+            selectedWorkAreaDipBounds.Height);
         EditorCanvas.ReferenceLayouts = ViewModel.GetDisplays()
             .Where(display => !string.Equals(display.Id, selectedDisplay.Id, StringComparison.OrdinalIgnoreCase))
             .Select(display =>

@@ -42,7 +42,9 @@ public sealed partial class MainViewModel
             if (string.Equals(displayId, SelectedDisplayItem?.Id, StringComparison.OrdinalIgnoreCase))
             {
                 CurrentDocument = result.Document;
-                UpdateDirtyState();
+                UpdateDirtyState(IsLayoutEditMode
+                    ? $"已调整{displayId}的分割线位置"
+                    : null);
             }
 
             if (persist)

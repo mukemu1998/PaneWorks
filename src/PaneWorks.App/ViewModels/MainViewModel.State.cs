@@ -68,7 +68,7 @@ public sealed partial class MainViewModel
             SyncActiveSnapWithCurrentWorkspaceIfNeeded();
             CurrentDocument = GetDisplayLayout(_currentWorkspaceDocument, SelectedDisplayItem?.Id);
             RaisePropertyChanged(nameof(DisplayedLayoutName));
-            UpdateDirtyState();
+            UpdateDirtyState($"已将分区布局名称改为“{normalized}”");
             UpdateHistoryCommandStates();
         }
     }
@@ -80,6 +80,11 @@ public sealed partial class MainViewModel
         {
             if (SetProperty(ref _isDirty, value))
             {
+                if (!value)
+                {
+                    _pendingLayoutChangeDescription = string.Empty;
+                }
+
                 RaisePropertyChanged(nameof(DirtyLabel));
             }
         }
@@ -102,9 +107,15 @@ public sealed partial class MainViewModel
             RaisePropertyChanged(nameof(LayoutEditModeHint));
             RaisePropertyChanged(nameof(IsLayoutNameEditable));
             RaisePropertyChanged(nameof(IsLayoutNameReadOnly));
+            RaisePropertyChanged(nameof(IsLayoutListSelectionEnabled));
+            RaisePropertyChanged(nameof(CanOpenSelectedLayoutForEdit));
             UpdateLayoutCommandStates();
         }
     }
+
+    public bool IsLayoutListSelectionEnabled => !IsLayoutEditMode;
+
+    public bool CanOpenSelectedLayoutForEdit => !IsLayoutEditMode && SelectedLayoutItem is not null;
 
     public bool IsWorkspaceBindingMode
     {
@@ -164,6 +175,6 @@ public sealed partial class MainViewModel
 
     public bool TryClose()
     {
-        return ResolvePendingChanges("关闭 PaneWorks");
+        return !IsLayoutEditMode || ResolvePendingChanges("关闭 PaneWorks");
     }
 }

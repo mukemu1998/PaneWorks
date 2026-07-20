@@ -30,6 +30,7 @@ public partial class SettingsDialog : System.Windows.Window
         RuntimeSessionShortcutTextBox.Text = _runtimeSessionShortcut;
         MinimizeShortcutTextBox.Text = _minimizeShortcut;
         LaunchAtStartupCheckBox.IsChecked = settings.LaunchAtStartup;
+        AutoCheckForUpdatesCheckBox.IsChecked = settings.AutoCheckForUpdates;
     }
 
     public SettingsDialogResult? Result { get; private set; }
@@ -67,8 +68,9 @@ public partial class SettingsDialog : System.Windows.Window
             _minimizeShortcut,
             ShortcutGestureHelper.NormalizeShortcut(AppSettings.Default.MinimizeShortcut, "Esc"));
         var launchAtStartup = LaunchAtStartupCheckBox.IsChecked == true;
+        var autoCheckForUpdates = AutoCheckForUpdatesCheckBox.IsChecked == true;
 
-        Result = new SettingsDialogResult(snapShortcut, runtimeSessionShortcut, minimizeShortcut, launchAtStartup);
+        Result = new SettingsDialogResult(snapShortcut, runtimeSessionShortcut, minimizeShortcut, launchAtStartup, autoCheckForUpdates);
         DialogResult = true;
     }
 
@@ -93,4 +95,5 @@ public sealed record SettingsDialogResult(
     string SnapModifierKey,
     string RuntimeSessionModifierKey,
     string MinimizeShortcut,
-    bool LaunchAtStartup);
+    bool LaunchAtStartup,
+    bool AutoCheckForUpdates);

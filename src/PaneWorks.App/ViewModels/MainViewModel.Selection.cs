@@ -20,6 +20,11 @@ public sealed partial class MainViewModel
         get => _selectedLayoutItem;
         set
         {
+            if (IsLayoutEditMode && !ReferenceEquals(_selectedLayoutItem, value))
+            {
+                return;
+            }
+
             if (!SetProperty(ref _selectedLayoutItem, value))
             {
                 return;
@@ -31,10 +36,19 @@ public sealed partial class MainViewModel
             }
 
             _loadSelectedLayoutCommand.RaiseCanExecuteChanged();
+            RaisePropertyChanged(nameof(CanOpenSelectedLayoutForEdit));
             if (NewWorkspaceProfileCommand is RelayCommand createWorkspaceFromSelectedCommand)
             {
                 createWorkspaceFromSelectedCommand.RaiseCanExecuteChanged();
             }
+        }
+    }
+
+    public void ClearSelectedLayout()
+    {
+        if (!IsLayoutEditMode)
+        {
+            SelectedLayoutItem = null;
         }
     }
 

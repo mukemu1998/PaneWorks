@@ -1,4 +1,5 @@
 using PaneWorks.App.Diagnostics;
+using PaneWorks.App.Updates;
 using PaneWorks.App.ViewModels;
 using Forms = System.Windows.Forms;
 using Wpf = System.Windows;
@@ -22,6 +23,7 @@ public partial class App : Wpf.Application
     private DateTimeOffset _trayMenuOutsideClickIgnoreUntil;
     private bool _isExitRequested;
     private bool _isForceExitScheduled;
+    private readonly UpdateCoordinator _updateCoordinator = new();
 
     public App()
     {
@@ -32,12 +34,19 @@ public partial class App : Wpf.Application
     {
         base.OnStartup(e);
 
+        if (UpdateBootstrap.TryApplyPendingUpdate(e.Args))
+        {
+            Shutdown();
+            return;
+        }
+
         ShutdownMode = Wpf.ShutdownMode.OnExplicitShutdown;
         PaneWorksLog.Info("App startup");
         _mainWindow = new MainWindow();
         MainWindow = _mainWindow;
         InitializeNotifyIcon();
         _mainWindow.Show();
+        ScheduleAutomaticUpdateCheck();
     }
 
     protected override void OnExit(Wpf.ExitEventArgs e)
@@ -52,6 +61,34 @@ public partial class App : Wpf.Application
     public void CancelExitRequest()
     {
         _isExitRequested = false;
+    }
+
+    private void ScheduleAutomaticUpdateCheck()
+    {
+        if (_mainWindow is null || !_mainWindow.IsAutomaticUpdateCheckEnabled)
+        {
+            return;
+        }
+
+        var timer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(3)
+        };
+        timer.Tick += async (_, _) =>
+        {
+            timer.Stop();
+            if (_mainWindow is null || _isExitRequested || !_mainWindow.IsAutomaticUpdateCheckEnabled)
+            {
+                return;
+            }
+
+            await _updateCoordinator.CheckAndPromptAsync(
+                _mainWindow,
+                UpdateCoordinator.GetCurrentVersionLabel(),
+                showNoUpdateMessage: false,
+                showErrors: false);
+        };
+        timer.Start();
     }
 
 }

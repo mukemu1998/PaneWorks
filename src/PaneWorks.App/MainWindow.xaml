@@ -17,7 +17,8 @@
         AllowsTransparency="True"
         Background="Transparent"
         Topmost="True"
-        ShowInTaskbar="True">
+        ShowInTaskbar="True"
+        PreviewMouseLeftButtonDown="MainWindow_PreviewMouseLeftButtonDown">
     <Grid Background="{x:Null}">
         <Border Background="#28101625"
                 IsHitTestVisible="False"
@@ -34,6 +35,7 @@
                                       IsLayoutEditingEnabled="{Binding IsLayoutEditMode}"
                                       ShowWorkspaceBindingMarkers="{Binding IsWorkspaceBindingMode}"
                                       BindingDisplayId="{Binding SelectedDisplayItem.Id}"
+                                      EditingDisplayName="{Binding CurrentDisplayName}"
                                       WorkspaceWindowBindings="{Binding ActiveWorkspaceWindowBindings}" />
 
         <Grid x:Name="WorkbenchPanel"
@@ -257,7 +259,7 @@
                         </Grid.RowDefinitions>
 
                     <Border Grid.Row="0"
-                            Padding="18"
+                            Padding="0"
                             Background="#A0101219"
                             BorderBrush="#22FFFFFF"
                             BorderThickness="1"
@@ -265,11 +267,97 @@
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="14" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="14" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
+
+                            <ToggleButton x:Name="SnapLayoutSettingsToggle"
+                                          IsChecked="False"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          FocusVisualStyle="{x:Null}"
+                                          Focusable="False"
+                                          Cursor="Hand">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="HeaderBorder"
+                                                Padding="16,14"
+                                                Background="Transparent"
+                                                CornerRadius="22">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="12" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock FontSize="18"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource PaneTextBrush}"
+                                                               Text="吸附布局设置" />
+                                                    <TextBlock Margin="0,4,0,0"
+                                                               FontSize="12"
+                                                               Foreground="#9EA6B8"
+                                                               Text="选择、编辑并管理窗口吸附使用的分区布局。" />
+                                                </StackPanel>
+
+                                                <Border Grid.Column="2"
+                                                        Width="34"
+                                                        Height="34"
+                                                        VerticalAlignment="Center"
+                                                        Background="#18FFFFFF"
+                                                        BorderBrush="#30FFFFFF"
+                                                        BorderThickness="1"
+                                                        CornerRadius="12">
+                                                    <Grid HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"
+                                                          Width="14"
+                                                          Height="10">
+                                                        <Path x:Name="ArrowCollapsed"
+                                                              Data="M 0 0 L 7 8 L 14 0 Z"
+                                                              Fill="{StaticResource PaneTextBrush}"
+                                                              Stretch="Uniform" />
+                                                        <Path x:Name="ArrowExpanded"
+                                                              Data="M 0 8 L 7 0 L 14 8 Z"
+                                                              Fill="{StaticResource PaneTextBrush}"
+                                                              Stretch="Uniform"
+                                                              Visibility="Collapsed" />
+                                                    </Grid>
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="HeaderBorder" Property="Background" Value="#122F80ED" />
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="ArrowCollapsed" Property="Visibility" Value="Collapsed" />
+                                                <Setter TargetName="ArrowExpanded" Property="Visibility" Value="Visible" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+
+                            <Grid Grid.Row="1"
+                                  Margin="16,8,16,16">
+                                <Grid.Style>
+                                    <Style TargetType="Grid">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=SnapLayoutSettingsToggle}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Grid.Style>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="14" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="14" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
 
                             <Grid Grid.Row="0">
                                 <Grid.ColumnDefinitions>
@@ -279,7 +367,7 @@
                                 <StackPanel>
                                     <TextBlock FontSize="20"
                                                FontWeight="SemiBold"
-                                               Text="吸附布局设置" />
+                                               Text="编辑与保存" />
                                     <TextBlock Margin="0,6,0,0"
                                                Foreground="#CDD3DF"
                                                Text="{Binding StatusLine}"
@@ -368,28 +456,26 @@
                                     <TextBlock FontSize="13"
                                                Foreground="#58AFFF"
                                                Text="编辑屏幕" />
-                                    <ComboBox Margin="0,8,0,0"
-                                              ItemsSource="{Binding Displays}"
-                                              SelectedItem="{Binding SelectedDisplayItem}"
-                                              MaxDropDownHeight="360">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Margin="2,0">
-                                                    <TextBlock FontSize="15"
-                                                               FontWeight="SemiBold"
-                                                               Foreground="{StaticResource PaneTextBrush}"
-                                                               Text="{Binding Name}" />
-                                                    <TextBlock Margin="0,3,0,0"
-                                                               FontSize="12"
-                                                               Foreground="#D7E6FF"
-                                                               Text="{Binding Description}" />
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
+                                    <Border Margin="0,8,0,0"
+                                            Padding="12,9"
+                                            Background="#1AFFFFFF"
+                                            BorderBrush="#3FFFFFFF"
+                                            BorderThickness="1"
+                                            CornerRadius="14">
+                                        <StackPanel>
+                                            <TextBlock FontSize="15"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding CurrentDisplayName}" />
+                                            <TextBlock Margin="0,3,0,0"
+                                                       FontSize="12"
+                                                       Foreground="#D7E6FF"
+                                                       Text="{Binding CurrentDisplaySummary}" />
+                                        </StackPanel>
+                                    </Border>
                                     <TextBlock Margin="0,8,0,0"
-                                               Foreground="#D7E6FF"
-                                               Text="{Binding CurrentDisplaySummary}"
+                                               FontSize="12"
+                                               Foreground="#F0AAAD"
+                                               Text="进入编辑后，点击其他屏幕区域即可切换编辑屏幕。"
                                                TextWrapping="Wrap" />
                                 </StackPanel>
 
@@ -431,6 +517,7 @@
                                                 Content="编辑当前选择" />
                                         <Button MinWidth="98"
                                                 Margin="0,0,0,8"
+                                                Style="{StaticResource ExitEditButtonStyle}"
                                                 Command="{Binding ExitLayoutEditModeCommand}"
                                                 Content="退出编辑" />
                                     </WrapPanel>
@@ -467,6 +554,7 @@
                                                     Command="{Binding SetSelectedLayoutAsSnapLayoutCommand}"
                                                     Content="设为当前吸附" />
                                             <Button Margin="0,0,8,8"
+                                                    Style="{StaticResource OpenLayoutEditButtonStyle}"
                                                     Command="{Binding LoadSelectedLayoutCommand}"
                                                     Content="打开编辑" />
                                             <Button Margin="0,0,0,8"
@@ -477,6 +565,8 @@
 
                                         <ListBox Grid.Row="2"
                                                  MaxHeight="150"
+                                                 IsHitTestVisible="{Binding IsLayoutListSelectionEnabled}"
+                                                 Focusable="False"
                                                  ItemsSource="{Binding Layouts}"
                                                  SelectedItem="{Binding SelectedLayoutItem}">
                                             <ListBox.ItemTemplate>
@@ -537,6 +627,7 @@
                                 </Border>
                             </Grid>
                         </Grid>
+                    </Grid>
                     </Border>
 
                     <Border Grid.Row="2"

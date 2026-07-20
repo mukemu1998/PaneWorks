@@ -23,13 +23,76 @@ public sealed partial class MainViewModel
 
     public bool TryGetDisplayById(string? displayId, out DisplayInfo display)
     {
-        if (!string.IsNullOrWhiteSpace(displayId) && _displaysById.TryGetValue(displayId, out display!))
+        var resolvedDisplay = ResolveCurrentDisplay(displayId);
+        if (resolvedDisplay is not null)
         {
+            display = resolvedDisplay;
             return true;
         }
 
         display = GetSelectedDisplay();
         return false;
+    }
+
+    public bool ReconcileDisplaysAfterStartup()
+    {
+        var previousTopology = GetDisplayTopologyFingerprint(_displaysById.Values);
+        var previousSelectedDisplayId = SelectedDisplayItem?.Id;
+
+        RefreshDisplays();
+
+        var currentTopology = GetDisplayTopologyFingerprint(_displaysById.Values);
+        var changed = !string.Equals(previousTopology, currentTopology, StringComparison.Ordinal);
+
+        _currentWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(_currentWorkspaceDocument);
+        _savedState = new PersistedWorkspaceState(
+            NormalizeWorkspaceForCurrentDisplays(_savedState.WorkspaceDocument),
+            _savedState.LayoutId);
+
+        if (ShouldSyncActiveSnapWithCurrentWorkspace())
+        {
+            SetActiveSnapWorkspace(_currentLayoutId, _currentWorkspaceDocument.Name, _currentWorkspaceDocument);
+        }
+        else
+        {
+            _activeSnapWorkspaceDocument = NormalizeWorkspaceForCurrentDisplays(_activeSnapWorkspaceDocument);
+            RaisePropertyChanged(nameof(ActiveSnapLayoutName));
+            RaisePropertyChanged(nameof(ActiveSnapLayoutId));
+            RaisePropertyChanged(nameof(DisplayedLayoutName));
+            RaisePropertyChanged(nameof(SnapLayoutLabel));
+            RaisePropertyChanged(nameof(WorkspaceProfileLabel));
+            RaiseWindowBindingStatusChanged();
+        }
+
+        var selectedDisplayId = !string.IsNullOrWhiteSpace(previousSelectedDisplayId)
+                                && _displaysById.ContainsKey(previousSelectedDisplayId)
+            ? previousSelectedDisplayId
+            : GetPrimaryDisplayId();
+
+        CurrentDocument = GetDisplayLayout(_currentWorkspaceDocument, selectedDisplayId);
+        SelectedNodeId = CurrentDocument.Root.Id;
+        SetSelectedDisplayItemSilently(selectedDisplayId);
+        UpdateDirtyState();
+        SaveSessionState();
+
+        return changed;
+    }
+
+    public void SelectDisplayForLayoutEditing(string displayId)
+    {
+        if (!IsLayoutEditMode || !TryGetDisplayById(displayId, out var display))
+        {
+            return;
+        }
+
+        if (string.Equals(SelectedDisplayItem?.Id, display.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        ActivateDisplay(display.Id, resetHistory: true);
+        SaveSessionState();
+        SetStatusMessage($"正在编辑{display.Name}的分区布局");
     }
 
     private void RefreshDisplays()
@@ -97,11 +160,29 @@ public sealed partial class MainViewModel
 
     private DisplayInfo GetDisplayOrPrimary(string? displayId)
     {
-        if (!string.IsNullOrWhiteSpace(displayId) && _displaysById.TryGetValue(displayId, out var display))
+        var resolvedDisplay = ResolveCurrentDisplay(displayId);
+        if (resolvedDisplay is not null)
         {
-            return display;
+            return resolvedDisplay;
         }
 
         return _displayDiscoveryService.GetPrimaryDisplay();
+    }
+
+    private static string GetDisplayTopologyFingerprint(IEnumerable<DisplayInfo> displays)
+    {
+        return string.Join(
+            ";",
+            displays
+                .OrderBy(display => display.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(display => string.Join(
+                    "|",
+                    display.Id,
+                    display.Bounds.X,
+                    display.Bounds.Y,
+                    display.Bounds.Width,
+                    display.Bounds.Height,
+                    display.IsPrimary,
+                    display.Orientation)));
     }
 }

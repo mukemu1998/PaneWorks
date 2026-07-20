@@ -1,11 +1,12 @@
 using System.Windows;
 using System.Windows.Media;
+using PaneWorks.App.Updates;
 
 namespace PaneWorks.App.Views;
 
 public partial class AboutDialog : System.Windows.Window
 {
-    private readonly GitHubReleaseClient _releaseClient = new();
+    private readonly UpdateCoordinator _updateCoordinator = new();
     private readonly string _versionLabel;
     private bool _checkingUpdates;
 

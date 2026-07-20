@@ -21,19 +21,29 @@ public sealed class SplitResizeService
 
     public double ClampRatio(ComputedSplitter splitter, double candidateRatio, double minRegionSize, double splitterThickness)
     {
+        return ClampRatio(splitter, candidateRatio, minRegionSize, minRegionSize, splitterThickness);
+    }
+
+    public double ClampRatio(
+        ComputedSplitter splitter,
+        double candidateRatio,
+        double firstRegionMinSize,
+        double secondRegionMinSize,
+        double splitterThickness)
+    {
         var availableLength = GetAvailableLength(splitter, splitterThickness);
         if (availableLength <= 0)
         {
             return splitter.CurrentRatio;
         }
 
-        var minRatio = minRegionSize / availableLength;
-        if (minRatio >= 0.5)
+        var minRatio = firstRegionMinSize / availableLength;
+        var maxRatio = 1 - (secondRegionMinSize / availableLength);
+        if (minRatio >= maxRatio)
         {
             return 0.5;
         }
 
-        var maxRatio = 1 - minRatio;
         return Math.Clamp(candidateRatio, minRatio, maxRatio);
     }
 

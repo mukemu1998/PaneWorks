@@ -6,6 +6,12 @@ namespace PaneWorks.App;
 
 public partial class App
 {
+    public void ExitForUpdate()
+    {
+        _isExitRequested = true;
+        ShutdownCompletely();
+    }
+
     public void MinimizeMainWindowToTray()
     {
         if (_mainWindow is null)
@@ -74,7 +80,9 @@ public partial class App
             _mainWindow.PrepareForTrayRestore();
             _mainWindow.ShowInTaskbar = true;
             _mainWindow.Show();
-            _mainWindow.CompleteMainWindowPresentation();
+            _mainWindow.Opacity = 1;
+            _mainWindow.UpdateLayout();
+            _mainWindow.Activate();
             _mainWindow.Close();
 
             if (_isExitRequested)

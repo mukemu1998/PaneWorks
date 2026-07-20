@@ -48,6 +48,14 @@ public partial class MainWindow
             return;
         }
 
+        if (_workspaceApplyService.UsesConservativeSnapHandling(_movingWindowHandle))
+        {
+            // The initial detach already restored the original bounds. Reapplying it
+            // after the native drag ends can break an accelerated viewport again.
+            _pendingDetachedRestoreBounds = null;
+            return;
+        }
+
         var restoreBounds = GetDetachedRestoreBounds(_movingWindowHandle, _pendingDetachedRestoreBounds.Value);
         PaneWorksLog.Info($"Finalize detached restore: 0x{_movingWindowHandle.ToInt64():X}, restore={restoreBounds.Width:0}x{restoreBounds.Height:0}");
         ScheduleDetachedWindowRestore(_movingWindowHandle, restoreBounds);

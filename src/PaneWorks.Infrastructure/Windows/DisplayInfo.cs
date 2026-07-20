@@ -8,4 +8,5 @@ public sealed record DisplayInfo(
     string Name,
     PaneRect Bounds,
     PaneRect WorkArea,
-    bool IsPrimary);
+    bool IsPrimary,
+    WorkspaceDisplayOrientation Orientation);

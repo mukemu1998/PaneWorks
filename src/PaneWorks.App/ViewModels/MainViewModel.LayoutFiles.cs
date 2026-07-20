@@ -32,7 +32,10 @@ public sealed partial class MainViewModel
 
         try
         {
-            await SaveToTargetAsync(targetId, targetName, treatAsSaveAs, notifyOnSuccess: false);
+            if (await SaveToTargetAsync(targetId, targetName, treatAsSaveAs, notifyOnSuccess: false))
+            {
+                LeaveLayoutEditMode($"分区布局“{targetName}”已保存并退出编辑");
+            }
         }
         finally
         {
@@ -60,7 +63,10 @@ public sealed partial class MainViewModel
 
         try
         {
-            await SaveToTargetAsync(targetId, targetName, treatAsSaveAs: true, notifyOnSuccess: false);
+            if (await SaveToTargetAsync(targetId, targetName, treatAsSaveAs: true, notifyOnSuccess: false))
+            {
+                LeaveLayoutEditMode($"分区布局“{targetName}”已保存并退出编辑");
+            }
         }
         finally
         {

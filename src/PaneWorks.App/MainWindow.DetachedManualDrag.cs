@@ -42,6 +42,7 @@ public partial class MainWindow
         var dragGeneration = Interlocked.Increment(ref _manualDetachedDragGeneration);
         var anchorRatioX = _movingWindowDragAnchorRatioX;
         var anchorOffsetY = _movingWindowDragAnchorOffsetY;
+        var usesConservativeHandling = _workspaceApplyService.UsesConservativeSnapHandling(windowHandle);
 
         _ = Task.Factory.StartNew(
             () => RunManualDetachedDragLoop(
@@ -51,6 +52,7 @@ public partial class MainWindow
                 dragGeneration,
                 anchorRatioX,
                 anchorOffsetY,
+                usesConservativeHandling,
                 cancellationToken),
             cancellationToken,
             TaskCreationOptions.LongRunning,
@@ -76,6 +78,7 @@ public partial class MainWindow
         long dragGeneration,
         double anchorRatioX,
         double anchorOffsetY,
+        bool usesConservativeHandling,
         CancellationToken cancellationToken)
     {
         PaneRect? lastBounds = null;
@@ -99,7 +102,16 @@ public partial class MainWindow
 
                 if (moved)
                 {
-                    WaitForDesktopFrame();
+                    if (usesConservativeHandling)
+                    {
+                        // Accelerated viewports do not tolerate a continuous stream
+                        // of programmatic resizes while being detached.
+                        Thread.Sleep(25);
+                    }
+                    else
+                    {
+                        WaitForDesktopFrame();
+                    }
                 }
                 else
                 {

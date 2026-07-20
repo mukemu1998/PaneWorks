@@ -26,8 +26,16 @@ public partial class MainWindow
         var leftMin = primaryDisplayDipBounds.X - _virtualDesktopBounds.X + 32;
         var leftMax = primaryDisplayDipBounds.X - _virtualDesktopBounds.X + Math.Max(32, primaryDisplayDipBounds.Width - panelWidth - 32);
         var left = Math.Clamp(preferredLeft, leftMin, leftMax);
-        var top = (primaryDisplayDipBounds.Y - _virtualDesktopBounds.Y)
+        var calculatedTop = (primaryDisplayDipBounds.Y - _virtualDesktopBounds.Y)
             + Math.Max(24, (primaryDisplayDipBounds.Height - panelHeight) / 2);
+        if (!string.Equals(_workbenchPanelAnchorDisplayId, primaryDisplay.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            _workbenchPanelAnchorDisplayId = primaryDisplay.Id;
+            _workbenchPanelAnchoredTop = null;
+        }
+
+        _workbenchPanelAnchoredTop ??= calculatedTop;
+        var top = _workbenchPanelAnchoredTop.Value;
 
         WorkbenchPanel.HorizontalAlignment = System.Windows.HorizontalAlignment.Left;
         WorkbenchPanel.VerticalAlignment = System.Windows.VerticalAlignment.Top;

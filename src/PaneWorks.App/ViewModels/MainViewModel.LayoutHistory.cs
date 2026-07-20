@@ -32,7 +32,7 @@ public sealed partial class MainViewModel
         CurrentDocument = GetDisplayLayout(_currentWorkspaceDocument, SelectedDisplayItem?.Id);
         SelectedNodeId = state.SelectedNodeId;
         SyncActiveSnapWithCurrentWorkspaceIfNeeded();
-        UpdateDirtyState();
+        UpdateDirtyState("已撤销或重做分区编辑");
         UpdateHistoryCommandStates();
     }
 
@@ -48,9 +48,17 @@ public sealed partial class MainViewModel
         UpdateHistoryCommandStates();
     }
 
-    private void UpdateDirtyState()
+    private void UpdateDirtyState(string? changeDescription = null)
     {
-        IsDirty = !Equals(_savedState, new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId));
+        var isDirty = IsLayoutEditMode
+            && !Equals(_savedState, new PersistedWorkspaceState(_currentWorkspaceDocument, _currentLayoutId));
+
+        if (isDirty && !string.IsNullOrWhiteSpace(changeDescription))
+        {
+            _pendingLayoutChangeDescription = changeDescription;
+        }
+
+        IsDirty = isDirty;
     }
 
     private void UpdateHistoryCommandStates()
@@ -64,6 +72,7 @@ public sealed partial class MainViewModel
         _saveLayoutCommand.RaiseCanExecuteChanged();
         _saveAsLayoutCommand.RaiseCanExecuteChanged();
         _exitLayoutEditModeCommand.RaiseCanExecuteChanged();
+        _loadSelectedLayoutCommand.RaiseCanExecuteChanged();
         if (SplitHorizontalCommand is RelayCommand splitHorizontalCommand)
         {
             splitHorizontalCommand.RaiseCanExecuteChanged();

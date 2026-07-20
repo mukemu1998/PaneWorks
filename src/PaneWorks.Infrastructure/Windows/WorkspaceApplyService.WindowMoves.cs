@@ -49,7 +49,7 @@ public sealed partial class WorkspaceApplyService
             return;
         }
 
-        var targetBounds = ApplyWindowFrameAdjustment(ExpandBoundsForSeamCover(bounds), frameAdjustment);
+        var targetBounds = GetSnappedWindowBounds(windowHandle, bounds, frameAdjustment);
 
         SetWindowPos(
             windowHandle,
@@ -68,6 +68,18 @@ public sealed partial class WorkspaceApplyService
             return;
         }
 
+        // Real-time renderers such as Marmoset Toolbag can corrupt their swap chain
+        // when their HWND is included in one deferred batch with other windows.
+        if (updates.Any(update => UsesConservativeSnapMode(update.WindowHandle)))
+        {
+            foreach (var update in updates)
+            {
+                MoveSnappedWindowToBounds(update.WindowHandle, update.Bounds, update.FrameAdjustment);
+            }
+
+            return;
+        }
+
         var deferHandle = BeginDeferWindowPos(updates.Count);
         if (deferHandle != IntPtr.Zero)
         {
@@ -78,8 +90,9 @@ public sealed partial class WorkspaceApplyService
                     continue;
                 }
 
-                var targetBounds = ApplyWindowFrameAdjustment(
-                    ExpandBoundsForSeamCover(update.Bounds),
+                var targetBounds = GetSnappedWindowBounds(
+                    update.WindowHandle,
+                    update.Bounds,
                     update.FrameAdjustment);
                 deferHandle = DeferWindowPos(
                     deferHandle,

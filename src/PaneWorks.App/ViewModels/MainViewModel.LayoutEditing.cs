@@ -23,7 +23,10 @@ public sealed partial class MainViewModel
             return;
         }
 
-        ApplyEditorMutation(result.Document, result.SelectedNodeId);
+        ApplyEditorMutation(
+            result.Document,
+            result.SelectedNodeId,
+            $"已调整{SelectedDisplayItem?.Name ?? "当前屏幕"}的分割线位置");
     }
 
     public void HandleCanvasContextAction(CanvasContextAction action, string targetNodeId)
@@ -74,7 +77,10 @@ public sealed partial class MainViewModel
             return;
         }
 
-        ApplyEditorMutation(result.Document, result.SelectedNodeId);
+        ApplyEditorMutation(
+            result.Document,
+            result.SelectedNodeId,
+            $"已在{SelectedDisplayItem?.Name ?? "当前屏幕"}新增{GetSplitDirectionLabel(direction)}二等分");
     }
 
     private void SplitLeafIntoThirds(string? nodeId, SplitDirection direction)
@@ -95,7 +101,10 @@ public sealed partial class MainViewModel
             return;
         }
 
-        ApplyEditorMutation(result.Document, result.SelectedNodeId);
+        ApplyEditorMutation(
+            result.Document,
+            result.SelectedNodeId,
+            $"已在{SelectedDisplayItem?.Name ?? "当前屏幕"}新增{GetSplitDirectionLabel(direction)}三等分");
     }
 
     private void DeleteContainingSplit(string? nodeId)
@@ -125,10 +134,16 @@ public sealed partial class MainViewModel
             return;
         }
 
-        ApplyEditorMutation(result.Document, result.SelectedNodeId);
+        ApplyEditorMutation(
+            result.Document,
+            result.SelectedNodeId,
+            $"已在{SelectedDisplayItem?.Name ?? "当前屏幕"}删除一条分割线并合并区域");
     }
 
-    private void ApplyEditorMutation(LayoutDocument document, string? selectedNodeId)
+    private void ApplyEditorMutation(
+        LayoutDocument document,
+        string? selectedNodeId,
+        string changeDescription)
     {
         PushUndoState();
         _redoStack.Clear();
@@ -136,7 +151,12 @@ public sealed partial class MainViewModel
         CurrentDocument = document;
         SelectedNodeId = selectedNodeId;
         SyncActiveSnapWithCurrentWorkspaceIfNeeded();
-        UpdateDirtyState();
+        UpdateDirtyState(changeDescription);
         UpdateHistoryCommandStates();
+    }
+
+    private static string GetSplitDirectionLabel(SplitDirection direction)
+    {
+        return direction == SplitDirection.Horizontal ? "横向" : "纵向";
     }
 }

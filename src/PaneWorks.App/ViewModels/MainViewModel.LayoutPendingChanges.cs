@@ -7,12 +7,12 @@ public sealed partial class MainViewModel
 {
     private bool ResolvePendingChanges(string actionLabel)
     {
-        if (!IsDirty)
+        if (!IsLayoutEditMode || !IsDirty)
         {
             return true;
         }
 
-        var result = ShowMessage($"当前有未保存修改，是否先保存再{actionLabel}？", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        var result = ShowMessage(BuildPendingChangesPrompt(actionLabel), MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (result == MessageBoxResult.Cancel)
         {
             return false;
@@ -28,12 +28,12 @@ public sealed partial class MainViewModel
 
     private async Task<bool> ResolvePendingChangesAsync(string actionLabel, bool discardChangesOnNo = false)
     {
-        if (!IsDirty)
+        if (!IsLayoutEditMode || !IsDirty)
         {
             return true;
         }
 
-        var result = ShowMessage($"当前有未保存修改，是否先保存再{actionLabel}？", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        var result = ShowMessage(BuildPendingChangesPrompt(actionLabel), MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (result == MessageBoxResult.Cancel)
         {
             return false;
@@ -64,5 +64,14 @@ public sealed partial class MainViewModel
         RaisePropertyChanged(nameof(DisplayedLayoutName));
         SaveSessionState();
         SetStatusMessage("已放弃未保存的分区修改");
+    }
+
+    private string BuildPendingChangesPrompt(string actionLabel)
+    {
+        var changeDescription = string.IsNullOrWhiteSpace(_pendingLayoutChangeDescription)
+            ? "分区布局已被修改"
+            : _pendingLayoutChangeDescription;
+
+        return $"分区布局“{CurrentLayoutName}”尚未保存。\n{changeDescription}\n是否先保存再{actionLabel}？";
     }
 }

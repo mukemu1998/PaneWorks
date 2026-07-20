@@ -54,7 +54,7 @@ public sealed partial class WorkspaceApplyService
 
     public void RestoreRoundedCorners(IntPtr windowHandle)
     {
-        if (windowHandle == IntPtr.Zero)
+        if (windowHandle == IntPtr.Zero || UsesConservativeSnapMode(windowHandle))
         {
             return;
         }

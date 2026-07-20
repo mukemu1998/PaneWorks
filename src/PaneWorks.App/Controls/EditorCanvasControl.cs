@@ -31,6 +31,8 @@ public sealed partial class EditorCanvasControl : FrameworkElement
     public event EventHandler<SnapLayoutSwitchRequestedEventArgs>? SnapLayoutSwitchRequested;
     public event EventHandler<WorkspaceProfileSwitchRequestedEventArgs>? WorkspaceProfileSwitchRequested;
 
+    public event EventHandler<DisplayEditRequestedEventArgs>? DisplayEditRequested;
+
     private PaneRect GetDesktopStageBounds()
     {
         if (StageBounds.Width > 0 && StageBounds.Height > 0)

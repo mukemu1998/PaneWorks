@@ -21,7 +21,8 @@ public sealed partial class MainViewModel
             dialog.Result.SnapModifierKey,
             dialog.Result.RuntimeSessionModifierKey,
             dialog.Result.MinimizeShortcut,
-            dialog.Result.LaunchAtStartup));
+            dialog.Result.LaunchAtStartup,
+            dialog.Result.AutoCheckForUpdates));
 
         try
         {
@@ -88,6 +89,8 @@ public sealed partial class MainViewModel
             MinimizeShortcut = minimizeShortcut
         };
     }
+
+    public bool AutoCheckForUpdates => _appSettings.AutoCheckForUpdates;
 
     private static string GetApplicationVersion()
     {

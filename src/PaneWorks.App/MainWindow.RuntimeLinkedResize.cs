@@ -106,8 +106,14 @@ public partial class MainWindow
                                 _workspaceApplyService.CancelWindowDrag(session.SourceWindowHandle);
                             }
 
-                            _workspaceApplyService.MoveSnappedWindowsToBounds(updates);
-                            moved = true;
+                            var immediateUpdates = updates
+                                .Where(update => !_workspaceApplyService.UsesConservativeSnapHandling(update.WindowHandle))
+                                .ToList();
+                            if (immediateUpdates.Count > 0)
+                            {
+                                _workspaceApplyService.MoveSnappedWindowsToBounds(immediateUpdates);
+                                moved = true;
+                            }
 
                             if (stopAtLockedEdge)
                             {
@@ -144,6 +150,7 @@ public partial class MainWindow
                     && _movingWindowHandle == session.SourceWindowHandle
                     && _movingWindowSnapResizeGesture)
                 {
+                    ApplyDeferredConservativeRuntimeResize(session, activeNeighbors);
                     FinishRuntimeLinkedResizeGesture(session);
                 }
             });
@@ -182,6 +189,32 @@ public partial class MainWindow
         }
 
         return updates;
+    }
+
+    private void ApplyDeferredConservativeRuntimeResize(
+        RuntimeLinkedResizeSession session,
+        IReadOnlyList<RuntimeLinkedResizeNeighbor> activeNeighbors)
+    {
+        if (!_workspaceApplyService.TryGetVisibleWindowBounds(session.SourceWindowHandle, out var sourceBounds))
+        {
+            return;
+        }
+
+        var edgePosition = ClampRuntimeLinkedEdgePosition(
+            GetEdgePosition(sourceBounds, session.Edge),
+            session.MinEdgePosition,
+            session.MaxEdgePosition);
+        var deferredUpdates = BuildRuntimeLinkedResizeUpdates(
+                session,
+                activeNeighbors,
+                edgePosition,
+                includeSourceWindow: true)
+            .Where(update => _workspaceApplyService.UsesConservativeSnapHandling(update.WindowHandle))
+            .ToList();
+        if (deferredUpdates.Count > 0)
+        {
+            _workspaceApplyService.MoveSnappedWindowsToBounds(deferredUpdates);
+        }
     }
 
     private void FinishRuntimeLinkedResizeGesture(RuntimeLinkedResizeSession session)

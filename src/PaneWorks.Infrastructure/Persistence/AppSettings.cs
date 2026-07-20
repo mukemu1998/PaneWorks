@@ -4,7 +4,8 @@ public sealed record AppSettings(
     string SnapModifierKey,
     string RuntimeSessionModifierKey,
     string MinimizeShortcut,
-    bool LaunchAtStartup)
+    bool LaunchAtStartup,
+    bool AutoCheckForUpdates = true)
 {
-    public static AppSettings Default { get; } = new("Shift", "Ctrl + Shift", "Escape", false);
+    public static AppSettings Default { get; } = new("Shift", "Ctrl + Shift", "Escape", false, true);
 }

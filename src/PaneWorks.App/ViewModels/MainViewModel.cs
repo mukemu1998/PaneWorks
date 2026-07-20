@@ -43,6 +43,7 @@ public sealed partial class MainViewModel : ObservableObject
     private LayoutListItemViewModel? _selectedLayoutItem;
     private DisplayItemViewModel? _selectedDisplayItem;
     private bool _isDirty;
+    private string _pendingLayoutChangeDescription = string.Empty;
     private bool _suppressDisplaySelectionChange;
     private bool _isSavingLayout;
     private bool _isLayoutEditMode;
@@ -81,7 +82,7 @@ public sealed partial class MainViewModel : ObservableObject
         _saveLayoutCommand = new RelayCommand(SaveCurrentLayout, () => IsLayoutEditMode);
         _saveAsLayoutCommand = new RelayCommand(SaveCurrentLayoutAs, () => IsLayoutEditMode);
         _editActiveSnapLayoutCommand = new RelayCommand(EditActiveSnapLayout);
-        _loadSelectedLayoutCommand = new RelayCommand(LoadSelectedLayout, () => SelectedLayoutItem is not null);
+        _loadSelectedLayoutCommand = new RelayCommand(LoadSelectedLayout, () => CanOpenSelectedLayoutForEdit);
         _exitLayoutEditModeCommand = new RelayCommand(ExitLayoutEditMode, () => IsLayoutEditMode);
         NewLayoutCommand = _newLayoutCommand;
         SaveLayoutCommand = _saveLayoutCommand;

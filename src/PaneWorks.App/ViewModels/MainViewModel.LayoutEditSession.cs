@@ -24,7 +24,7 @@ public sealed partial class MainViewModel
 
     private async void LoadSelectedLayout()
     {
-        if (SelectedLayoutItem is null)
+        if (IsLayoutEditMode || SelectedLayoutItem is null)
         {
             return;
         }
@@ -97,10 +97,15 @@ public sealed partial class MainViewModel
             return;
         }
 
+        LeaveLayoutEditMode("已退出分区编辑模式");
+    }
+
+    private void LeaveLayoutEditMode(string statusMessage)
+    {
         IsLayoutEditMode = false;
         SelectedLayoutItem = null;
         SelectedNodeId = null;
-        SetStatusMessage("已退出分区编辑模式");
+        SetStatusMessage(statusMessage);
     }
 
     private void EnterLayoutEditMode(string statusMessage)

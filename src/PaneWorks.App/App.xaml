@@ -84,6 +84,32 @@
             <Setter Property="Background" Value="#26E35C61" />
             <Setter Property="BorderBrush" Value="#66E35C61" />
         </Style>
+        <Style x:Key="ExitEditButtonStyle" TargetType="Button" BasedOn="{StaticResource RoundedButtonBaseStyle}">
+            <Setter Property="Background" Value="#1AFFFFFF" />
+            <Setter Property="BorderBrush" Value="#3FFFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsLayoutEditMode}" Value="True">
+                    <Setter Property="Background" Value="#26EFAF4D" />
+                    <Setter Property="BorderBrush" Value="#FFEFAF4D" />
+                    <Setter Property="BorderThickness" Value="2" />
+                    <Setter Property="Foreground" Value="#FFFFE5B5" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="OpenLayoutEditButtonStyle" TargetType="Button" BasedOn="{StaticResource RoundedButtonBaseStyle}">
+            <Setter Property="Background" Value="#1AFFFFFF" />
+            <Setter Property="BorderBrush" Value="#3FFFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CanOpenSelectedLayoutForEdit}" Value="True">
+                    <Setter Property="Background" Value="#263A8DF0" />
+                    <Setter Property="BorderBrush" Value="#FF58AFFF" />
+                    <Setter Property="BorderThickness" Value="2" />
+                    <Setter Property="Foreground" Value="#FFE3F2FF" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="CircleIconButtonStyle" TargetType="Button">
             <Setter Property="Width" Value="48" />
             <Setter Property="Height" Value="48" />

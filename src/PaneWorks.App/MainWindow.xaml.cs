@@ -69,11 +69,15 @@ public partial class MainWindow : Window
     private double _workbenchPanelDragStartOffsetY;
     private bool _isWorkbenchMiniBarPointerDown;
     private bool _isWorkbenchMiniBarDragging;
+    private string? _workbenchPanelAnchorDisplayId;
+    private double? _workbenchPanelAnchoredTop;
     private WpfPoint _workbenchMiniBarDragStartPoint;
     private double _workbenchMiniBarDragStartOffsetX;
     private double _workbenchMiniBarDragStartOffsetY;
 
     private MainViewModel ViewModel => (MainViewModel)DataContext;
+
+    internal bool IsAutomaticUpdateCheckEnabled => ViewModel.AutoCheckForUpdates;
 
     public MainWindow()
     {
@@ -97,6 +101,7 @@ public partial class MainWindow : Window
         _snapAssistFallbackTimer.Tick += SnapAssistFallbackTimer_Tick;
         EditorCanvas.NodeSelected += EditorCanvas_NodeSelected;
         EditorCanvas.SplitterRatioChanged += EditorCanvas_SplitterRatioChanged;
+        EditorCanvas.DisplayEditRequested += EditorCanvas_DisplayEditRequested;
         EditorCanvas.CanvasContextActionRequested += EditorCanvas_CanvasContextActionRequested;
         EditorCanvas.SnapLayoutSwitchRequested += EditorCanvas_SnapLayoutSwitchRequested;
         EditorCanvas.WorkspaceProfileSwitchRequested += EditorCanvas_WorkspaceProfileSwitchRequested;

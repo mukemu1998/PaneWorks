@@ -45,9 +45,7 @@ public sealed partial class WorkspaceApplyService
             return false;
         }
 
-        TryDisableRoundedCorners(windowHandle);
-        var seamCoveredBounds = ExpandBoundsForSeamCover(bounds);
-        var targetBounds = AdjustWindowBoundsForFrame(windowHandle, seamCoveredBounds);
+        var targetBounds = GetSnappedWindowBounds(windowHandle, bounds);
 
         var moved = SetWindowPos(
             windowHandle,
@@ -69,7 +67,7 @@ public sealed partial class WorkspaceApplyService
         }
 
         RestoreRoundedCorners(windowHandle);
-        var targetBounds = AdjustWindowBoundsForFrame(windowHandle, bounds);
+        var targetBounds = GetRestoreWindowBounds(windowHandle, bounds);
 
         SetWindowPos(
             windowHandle,
