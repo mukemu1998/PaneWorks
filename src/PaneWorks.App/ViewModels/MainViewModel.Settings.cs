@@ -40,7 +40,10 @@ public sealed partial class MainViewModel
             RaisePropertyChanged(nameof(SnapModifierKey));
             RaisePropertyChanged(nameof(RuntimeSessionModifierKey));
             RaisePropertyChanged(nameof(MinimizeShortcut));
-            RaisePropertyChanged(nameof(ShortcutSummary));
+            RaisePropertyChanged(nameof(SavedLayoutSnapShortcutLabel));
+            RaisePropertyChanged(nameof(TemporarySnapShortcutLabel));
+            RaisePropertyChanged(nameof(MinimizeShortcutLabel));
+            RaisePropertyChanged(nameof(StartupStatusLabel));
             ShowInfoMessage("设置已保存，新的快捷键和开机自启状态已经生效。");
         }
         catch (Exception ex)

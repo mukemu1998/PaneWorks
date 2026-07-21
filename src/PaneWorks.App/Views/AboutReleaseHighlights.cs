@@ -6,6 +6,10 @@ public static class AboutReleaseHighlights
     {
         return ParseVersion(versionLabel) switch
         {
+            { Major: 0, Minor: 3, Build: 2 } =>
+                "- 当前吸附状态按功能逐项展示，常用快捷键和启动状态更容易查看。\n" +
+                "- 临时吸附说明补全：区域中央正常吸附，四边二等分插入，独占分割线三等分插入。\n" +
+                "- 临时调整仅在当前运行会话生效，不会改写已保存的分区布局。",
             { Major: 0, Minor: 3, Build: 1 } =>
                 "- 修复自动更新下载时进度条不显示彩色填充的问题。\n" +
                 "- 下载开始后会正确从准备状态切换为实时百分比进度。",

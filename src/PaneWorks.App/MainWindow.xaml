@@ -609,10 +609,59 @@
                                                    Foreground="#D7E6FF"
                                                    Text="{Binding SelectionLabel}"
                                                    TextWrapping="Wrap" />
-                                        <TextBlock Margin="0,9,0,0"
-                                                   Foreground="#58AFFF"
-                                                   Text="{Binding ShortcutSummary}"
-                                                   TextWrapping="Wrap" />
+                                        <StackPanel Margin="0,12,0,0">
+                                            <TextBlock FontWeight="SemiBold"
+                                                       Foreground="#8DBBFF"
+                                                       Text="快捷操作" />
+                                            <TextBlock Margin="0,5,0,0"
+                                                       Foreground="#D7E6FF">
+                                                <Run Text="用户分区吸附：拖动窗口时按住 " />
+                                                <Run Foreground="#58AFFF"
+                                                     Text="{Binding SavedLayoutSnapShortcutLabel, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <TextBlock Margin="0,4,0,0"
+                                                       Foreground="#D7E6FF">
+                                                <Run Text="临时调整区吸附：拖动窗口时按住 " />
+                                                <Run Foreground="#58AFFF"
+                                                     Text="{Binding TemporarySnapShortcutLabel, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <TextBlock Margin="0,4,0,0"
+                                                       Foreground="#D7E6FF">
+                                                <Run Text="收进托盘：" />
+                                                <Run Foreground="#58AFFF"
+                                                     Text="{Binding MinimizeShortcutLabel, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <TextBlock Margin="0,4,0,0"
+                                                       Foreground="#D7E6FF">
+                                                <Run Text="开机自启：" />
+                                                <Run Foreground="#8FF0B8"
+                                                     Text="{Binding StartupStatusLabel, Mode=OneWay}" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <Border Margin="0,12,0,0"
+                                                Padding="10"
+                                                Background="#24154870"
+                                                BorderBrush="#4A58AFFF"
+                                                BorderThickness="1"
+                                                CornerRadius="12">
+                                            <StackPanel>
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Foreground="#83B8FF"
+                                                           Text="临时吸附说明" />
+                                                <TextBlock Margin="0,5,0,0"
+                                                           Foreground="#C8D8F4"
+                                                           Text="区域中央：按当前临时布局正常吸附；靠近区域上下左右边缘：插入窗口并二等分该区域。"
+                                                           TextWrapping="Wrap" />
+                                                <TextBlock Margin="0,4,0,0"
+                                                           Foreground="#C8D8F4"
+                                                           Text="拖到只连接两个区域的分割线：在两侧之间三等分插入；现有窗口会同步调整并保持联动。"
+                                                           TextWrapping="Wrap" />
+                                                <TextBlock Margin="0,4,0,0"
+                                                           Foreground="#8FF0B8"
+                                                           Text="临时吸附只在本次 PaneWorks 运行中有效，不会改写已保存的分区布局。"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
                                         <WrapPanel Margin="0,14,0,0">
                                             <Button x:Name="PauseSnapAssistButton"
                                                     Margin="0,0,8,8"

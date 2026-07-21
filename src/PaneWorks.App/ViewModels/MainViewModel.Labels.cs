@@ -89,15 +89,17 @@ public sealed partial class MainViewModel
         }
     }
 
-    public string ShortcutSummary
-    {
-        get
-        {
-            var startupLabel = _appSettings.LaunchAtStartup ? "已开启" : "未开启";
-            var snapLabel = ShortcutGestureHelper.ToDisplayString(_appSettings.SnapModifierKey, "Shift");
-            var runtimeLabel = ShortcutGestureHelper.ToDisplayString(_appSettings.RuntimeSessionModifierKey, "Ctrl + Shift");
-            var minimizeLabel = ShortcutGestureHelper.ToDisplayString(_appSettings.MinimizeShortcut, "Esc");
-            return $"拖动目标窗口时按住：用户分区吸附 {snapLabel}  |  临时调整区吸附 {runtimeLabel}  |  托盘：{minimizeLabel}  |  开机自启：{startupLabel}";
-        }
-    }
+    public string SavedLayoutSnapShortcutLabel => ShortcutGestureHelper.ToDisplayString(
+        _appSettings.SnapModifierKey,
+        "Shift");
+
+    public string TemporarySnapShortcutLabel => ShortcutGestureHelper.ToDisplayString(
+        _appSettings.RuntimeSessionModifierKey,
+        "Ctrl + Shift");
+
+    public string MinimizeShortcutLabel => ShortcutGestureHelper.ToDisplayString(
+        _appSettings.MinimizeShortcut,
+        "Esc");
+
+    public string StartupStatusLabel => _appSettings.LaunchAtStartup ? "已开启" : "未开启";
 }
