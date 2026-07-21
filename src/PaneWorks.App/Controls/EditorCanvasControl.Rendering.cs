@@ -53,6 +53,17 @@ public sealed partial class EditorCanvasControl
             }
         }
 
+        if (PreviewBounds is { } previewBounds)
+        {
+            var previewRect = ToRect(previewBounds);
+            drawingContext.DrawRoundedRectangle(
+                new SolidColorBrush(WpfColor.FromArgb(86, 41, 216, 242)),
+                new WpfPen(new SolidColorBrush(WpfColor.FromRgb(255, 99, 245)), 3.4),
+                previewRect,
+                10,
+                10);
+        }
+
         var stageRect = ToRect(stageBounds);
         if (IsLayoutEditingEnabled)
         {

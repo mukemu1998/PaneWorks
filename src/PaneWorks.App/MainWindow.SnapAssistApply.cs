@@ -16,6 +16,12 @@ public partial class MainWindow
         {
             RestoreDetachedWindowAfterMove();
         }
+        else if (TryResolveTemporarySnapTargetForRelease(out var temporaryTarget)
+                 && TryApplyTemporarySnapInsertion(temporaryTarget, reason))
+        {
+            // The insertion method updates the in-memory session, all affected windows,
+            // and the new binding as one atomic runtime operation.
+        }
         else if (TryResolveSnapTargetForRelease(out var snapRegion, out var snapDisplayId))
         {
             var restoreBounds = ResolveRestoreBoundsForSnap(_movingWindowHandle);

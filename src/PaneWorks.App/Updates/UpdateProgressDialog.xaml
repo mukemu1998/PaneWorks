@@ -13,6 +13,37 @@
         ShowInTaskbar="False"
         Background="Transparent"
         TextElement.Foreground="{StaticResource PaneTextBrush}">
+    <Window.Resources>
+        <Style x:Key="UpdateProgressBarStyle" TargetType="ProgressBar">
+            <Setter Property="Height" Value="12" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Border Background="#2A344457"
+                                BorderBrush="#405D7695"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                SnapsToDevicePixels="True">
+                            <Grid ClipToBounds="True">
+                                <Border x:Name="PART_Indicator"
+                                        HorizontalAlignment="Left"
+                                        CornerRadius="7"
+                                        SnapsToDevicePixels="True">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                            <GradientStop Offset="0" Color="#FF29D8F2" />
+                                            <GradientStop Offset="0.55" Color="#FF58AFFF" />
+                                            <GradientStop Offset="1" Color="#FFFF63F5" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
     <Border Padding="20"
             Background="#EE101219"
             BorderBrush="#3D58AFFF"
@@ -71,7 +102,7 @@
 
             <StackPanel Grid.Row="4">
                 <ProgressBar x:Name="DownloadProgressBar"
-                             Height="10"
+                             Style="{StaticResource UpdateProgressBarStyle}"
                              Minimum="0"
                              Maximum="100"
                              Value="0" />

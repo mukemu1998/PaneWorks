@@ -16,6 +16,10 @@ public partial class MainWindow
     private const double SnapAssistRegionProximityTolerance = 48;
     private const double SnapAssistRegionSwitchDistanceMargin = 12;
     private const double SnapAssistRegionSwitchOverlapMargin = 4096;
+    private const double TemporaryInsertEdgeThreshold = 260;
+    private const double TemporaryInsertMinimumEdgeThreshold = 64;
+    private const double TemporaryInsertEdgeRatio = 0.25;
+    private const double TemporaryInsertDividerTolerance = 22;
     private const double RuntimeLinkedResizeMinWidth = 120;
     private const double RuntimeLinkedResizeMinHeight = 80;
     private const double DragAnchorMinRatio = 0.08;

@@ -108,6 +108,78 @@ public sealed class LayoutEditorService
             changed);
     }
 
+    public LayoutInsertionResult InsertLeafAtEdge(
+        LayoutDocument document,
+        string leafNodeId,
+        SplitDirection direction,
+        bool insertBefore)
+    {
+        var insertedLeaf = new LeafNode(CreateNodeId());
+        var changed = false;
+
+        var root = ReplaceNode(document.Root, node =>
+        {
+            if (node is not LeafNode leaf || leaf.Id != leafNodeId)
+            {
+                return node;
+            }
+
+            changed = true;
+            return new SplitNode(
+                CreateNodeId(),
+                direction,
+                0.5,
+                insertBefore ? insertedLeaf : leaf,
+                insertBefore ? leaf : insertedLeaf);
+        });
+
+        return new LayoutInsertionResult(
+            changed ? document with { Root = root } : document,
+            insertedLeaf.Id,
+            changed);
+    }
+
+    public LayoutInsertionResult InsertLeafBetweenSiblingLeaves(
+        LayoutDocument document,
+        string splitNodeId,
+        string firstLeafNodeId,
+        string secondLeafNodeId)
+    {
+        var insertedLeaf = new LeafNode(CreateNodeId());
+        var changed = false;
+
+        var root = ReplaceNode(document.Root, node =>
+        {
+            if (node is not SplitNode split
+                || split.Id != splitNodeId
+                || split.First is not LeafNode firstLeaf
+                || split.Second is not LeafNode secondLeaf
+                || firstLeaf.Id != firstLeafNodeId
+                || secondLeaf.Id != secondLeafNodeId)
+            {
+                return node;
+            }
+
+            changed = true;
+            return new SplitNode(
+                split.Id,
+                split.Direction,
+                1d / 3d,
+                firstLeaf,
+                new SplitNode(
+                    CreateNodeId(),
+                    split.Direction,
+                    0.5,
+                    insertedLeaf,
+                    secondLeaf));
+        });
+
+        return new LayoutInsertionResult(
+            changed ? document with { Root = root } : document,
+            insertedLeaf.Id,
+            changed);
+    }
+
     public EditorMutationResult<LayoutDocument> UpdateSplitRatio(
         LayoutDocument document,
         string splitNodeId,

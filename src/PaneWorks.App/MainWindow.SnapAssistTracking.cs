@@ -37,6 +37,8 @@ public partial class MainWindow
         _movingWindowHandle = IntPtr.Zero;
         _hoveredSnapRegion = null;
         _hoveredSnapDisplayId = null;
+        _hoveredTemporarySnapTarget = null;
+        _lastTemporarySnapTarget = null;
         _movingWindowInitialBounds = null;
         _pendingDetachedRestoreBounds = null;
         _movingWindowStartedAt = null;
@@ -163,11 +165,39 @@ public partial class MainWindow
                 targetStageBounds,
                 SnapTargetSplitterThickness);
 
-            _hoveredSnapRegion = ResolveHoveredSnapRegion(targetGeometry, activeDisplay.Id, cursorInDevicePixels);
+            if (snapAssistMode == SnapAssistMode.RuntimeSession)
+            {
+                _hoveredTemporarySnapTarget = ResolveTemporarySnapTarget(
+                    snapDocument,
+                    targetGeometry,
+                    activeDisplay.Id,
+                    cursorInDevicePixels);
+                _hoveredSnapRegion = _hoveredTemporarySnapTarget is null
+                    ? null
+                    : targetGeometry.Regions.FirstOrDefault(region =>
+                        string.Equals(region.NodeId, _hoveredTemporarySnapTarget.TargetNodeId, StringComparison.Ordinal));
+            }
+            else
+            {
+                _hoveredTemporarySnapTarget = null;
+                _lastTemporarySnapTarget = null;
+                _hoveredSnapRegion = ResolveHoveredSnapRegion(targetGeometry, activeDisplay.Id, cursorInDevicePixels);
+            }
+
             _hoveredSnapDisplayId = activeDisplay.Id;
             RememberSnapAssistTarget(_hoveredSnapRegion, _hoveredSnapDisplayId);
+            if (snapAssistMode == SnapAssistMode.RuntimeSession)
+            {
+                RememberTemporarySnapTarget(_hoveredTemporarySnapTarget);
+            }
 
-            EnsureSnapOverlaysVisible(activeDisplay.Id, _hoveredSnapRegion?.NodeId, snapAssistMode);
+            EnsureSnapOverlaysVisible(
+                activeDisplay.Id,
+                _hoveredTemporarySnapTarget is null || _hoveredTemporarySnapTarget.Kind == SnapInsertionKind.Center
+                    ? _hoveredSnapRegion?.NodeId
+                    : null,
+                _hoveredTemporarySnapTarget?.Kind == SnapInsertionKind.Center ? null : _hoveredTemporarySnapTarget?.PreviewBounds,
+                snapAssistMode);
         }
         catch (Exception exception)
         {

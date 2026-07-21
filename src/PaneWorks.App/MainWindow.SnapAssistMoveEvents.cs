@@ -68,6 +68,7 @@ public partial class MainWindow
         PaneWorksLog.Info($"{(startedByForegroundFallback ? "Foreground fallback move started" : "Move started")}: 0x{_movingWindowHandle.ToInt64():X}");
         _hoveredSnapRegion = null;
         _hoveredSnapDisplayId = null;
+        _hoveredTemporarySnapTarget = null;
         ClearSnapAssistTargetMemory();
         _movingWindowInitialBounds = _workspaceApplyService.TryGetVisibleWindowBounds(_movingWindowHandle, out var initialBounds)
             ? initialBounds

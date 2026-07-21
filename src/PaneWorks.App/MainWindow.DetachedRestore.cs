@@ -191,6 +191,7 @@ public partial class MainWindow
         _movingWindowHandle = IntPtr.Zero;
         _hoveredSnapRegion = null;
         _hoveredSnapDisplayId = null;
+        _hoveredTemporarySnapTarget = null;
         ClearSnapAssistTargetMemory();
         _movingWindowInitialBounds = null;
         _pendingDetachedRestoreBounds = null;

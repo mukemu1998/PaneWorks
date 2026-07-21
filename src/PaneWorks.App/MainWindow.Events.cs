@@ -94,6 +94,9 @@ public partial class MainWindow
             DisarmSnapAssist(restoreWindow: false);
         }
 
+        // Runtime insertion is deliberately process-local and must never survive a real exit.
+        ClearSnapRuntimeCollections();
+
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
     }
 

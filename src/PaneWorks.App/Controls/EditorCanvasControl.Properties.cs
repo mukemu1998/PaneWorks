@@ -27,6 +27,13 @@ public sealed partial class EditorCanvasControl
             typeof(EditorCanvasControl),
             new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty PreviewBoundsProperty =
+        DependencyProperty.Register(
+            nameof(PreviewBounds),
+            typeof(PaneRect?),
+            typeof(EditorCanvasControl),
+            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
     public static readonly DependencyProperty AvailableLayoutsProperty =
         DependencyProperty.Register(
             nameof(AvailableLayouts),
@@ -127,6 +134,12 @@ public sealed partial class EditorCanvasControl
     {
         get => (string?)GetValue(PreviewNodeIdProperty);
         set => SetValue(PreviewNodeIdProperty, value);
+    }
+
+    public PaneRect? PreviewBounds
+    {
+        get => (PaneRect?)GetValue(PreviewBoundsProperty);
+        set => SetValue(PreviewBoundsProperty, value);
     }
 
     public IEnumerable<LayoutListItemViewModel>? AvailableLayouts

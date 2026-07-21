@@ -10,7 +10,11 @@ namespace PaneWorks.App;
 
 public partial class MainWindow
 {
-    private void EnsureSnapOverlaysVisible(string activeDisplayId, string? activePreviewNodeId, SnapAssistMode snapAssistMode)
+    private void EnsureSnapOverlaysVisible(
+        string activeDisplayId,
+        string? activePreviewNodeId,
+        PaneRect? activePreviewBounds,
+        SnapAssistMode snapAssistMode)
     {
         var liveDisplayIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -28,6 +32,9 @@ public partial class MainWindow
             overlayWindow.Document = GetSnapAssistLayoutDocumentForDisplay(display.Id, snapAssistMode);
             overlayWindow.PreviewNodeId = string.Equals(display.Id, activeDisplayId, StringComparison.OrdinalIgnoreCase)
                 ? activePreviewNodeId
+                : null;
+            overlayWindow.PreviewBounds = string.Equals(display.Id, activeDisplayId, StringComparison.OrdinalIgnoreCase)
+                ? GetOverlayPreviewBounds(activePreviewBounds, display)
                 : null;
             overlayWindow.StageBounds = GetSnapVisualStageBounds(displayDipBounds);
             overlayWindow.Left = displayDipBounds.X;
@@ -57,6 +64,7 @@ public partial class MainWindow
         foreach (var overlayWindow in _snapOverlayWindows.Values)
         {
             overlayWindow.PreviewNodeId = null;
+            overlayWindow.PreviewBounds = null;
             if (overlayWindow.IsVisible)
             {
                 overlayWindow.Hide();
@@ -151,6 +159,22 @@ public partial class MainWindow
         return snapAssistMode == SnapAssistMode.RuntimeSession
             ? GetRuntimeSessionLayoutDocumentForDisplay(displayId)
             : ViewModel.GetSnapLayoutDocumentForDisplay(displayId);
+    }
+
+    private PaneRect? GetOverlayPreviewBounds(PaneRect? previewBounds, DisplayInfo display)
+    {
+        if (previewBounds is null)
+        {
+            return null;
+        }
+
+        var previewDipBounds = DeviceRectToDipRect(previewBounds.Value);
+        var displayDipBounds = DeviceRectToDipRect(display.Bounds);
+        return new PaneRect(
+            previewDipBounds.X - displayDipBounds.X,
+            previewDipBounds.Y - displayDipBounds.Y,
+            previewDipBounds.Width,
+            previewDipBounds.Height);
     }
 
     private LayoutDocument GetRuntimeSessionLayoutDocumentForDisplay(string displayId)

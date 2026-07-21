@@ -28,6 +28,12 @@ public partial class SnapOverlayWindow : Window
         set => OverlayCanvas.PreviewNodeId = value;
     }
 
+    public PaneRect? PreviewBounds
+    {
+        get => OverlayCanvas.PreviewBounds;
+        set => OverlayCanvas.PreviewBounds = value;
+    }
+
     public PaneRect StageBounds
     {
         get => OverlayCanvas.StageBounds;

@@ -33,10 +33,12 @@ public partial class MainWindow : Window
     private IntPtr _movingWindowHandle;
     private ComputedRegion? _hoveredSnapRegion;
     private string? _hoveredSnapDisplayId;
+    private TemporarySnapTarget? _hoveredTemporarySnapTarget;
     private ComputedRegion? _lastSnapAssistRegion;
     private string? _lastSnapAssistDisplayId;
     private DateTimeOffset _lastSnapAssistTargetAt;
     private IntPtr _lastSnapAssistWindowHandle;
+    private TemporarySnapTarget? _lastTemporarySnapTarget;
     private PaneRect? _movingWindowInitialBounds;
     private PaneRect? _pendingDetachedRestoreBounds;
     private DateTimeOffset? _movingWindowStartedAt;

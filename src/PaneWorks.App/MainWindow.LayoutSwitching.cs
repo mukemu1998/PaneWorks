@@ -33,6 +33,8 @@ public partial class MainWindow
         _movingWindowHandle = IntPtr.Zero;
         _hoveredSnapRegion = null;
         _hoveredSnapDisplayId = null;
+        _hoveredTemporarySnapTarget = null;
+        _lastTemporarySnapTarget = null;
         _movingWindowInitialBounds = null;
         _pendingDetachedRestoreBounds = null;
         _movingWindowStartedAt = null;

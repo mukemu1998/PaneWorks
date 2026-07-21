@@ -125,6 +125,35 @@ public partial class MainWindow
         _lastSnapAssistDisplayId = null;
         _lastSnapAssistTargetAt = DateTimeOffset.MinValue;
         _lastSnapAssistWindowHandle = IntPtr.Zero;
+        _lastTemporarySnapTarget = null;
+    }
+
+    private void RememberTemporarySnapTarget(TemporarySnapTarget? target)
+    {
+        if (target is not null && _movingWindowHandle != IntPtr.Zero)
+        {
+            _lastTemporarySnapTarget = target;
+        }
+    }
+
+    private bool TryResolveTemporarySnapTargetForRelease(out TemporarySnapTarget target)
+    {
+        if (_hoveredTemporarySnapTarget is not null)
+        {
+            target = _hoveredTemporarySnapTarget;
+            return true;
+        }
+
+        if (_lastTemporarySnapTarget is not null
+            && _lastSnapAssistWindowHandle == _movingWindowHandle
+            && DateTimeOffset.UtcNow - _lastSnapAssistTargetAt <= SnapAssistTargetMemoryDuration)
+        {
+            target = _lastTemporarySnapTarget;
+            return true;
+        }
+
+        target = default!;
+        return false;
     }
 
     private static double GetDistanceToRect(PaneRect rect, WpfPoint point)
