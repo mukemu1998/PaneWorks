@@ -14,6 +14,7 @@ public partial class UpdateProgressDialog : Window
         StatusTextBlock.Text = status;
         DetailTextBlock.Text = detail;
         var boundedProgress = Math.Clamp(progress, 0, 100);
+        DownloadProgressBar.IsIndeterminate = false;
         DownloadProgressBar.Value = boundedProgress;
         ProgressTextBlock.Text = $"{boundedProgress:0}%";
     }

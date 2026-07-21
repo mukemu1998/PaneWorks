@@ -6,6 +6,9 @@ public static class AboutReleaseHighlights
     {
         return ParseVersion(versionLabel) switch
         {
+            { Major: 0, Minor: 3, Build: 1 } =>
+                "- 修复自动更新下载时进度条不显示彩色填充的问题。\n" +
+                "- 下载开始后会正确从准备状态切换为实时百分比进度。",
             { Major: 0, Minor: 3, Build: 0 } =>
                 "- Ctrl + Shift 临时插入吸附：拖到区域边缘可二等分插入，拖到独占分割线可三等分插入。\n" +
                 "- 拖动时会预显示实际落位，插入后已有窗口会同步调整并继续支持边缘联动。\n" +

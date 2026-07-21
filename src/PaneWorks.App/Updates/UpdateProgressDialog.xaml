@@ -24,7 +24,8 @@
                                 BorderThickness="1"
                                 CornerRadius="8"
                                 SnapsToDevicePixels="True">
-                            <Grid ClipToBounds="True">
+                            <Grid x:Name="PART_Track"
+                                  ClipToBounds="True">
                                 <Border x:Name="PART_Indicator"
                                         HorizontalAlignment="Left"
                                         CornerRadius="7"
